@@ -25,7 +25,7 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.currentAdmin(r); err == nil {
-		http.Redirect(w, r, "/admin/routers", http.StatusSeeOther)
+		http.Redirect(w, r, "/admin/", http.StatusSeeOther)
 		return
 	}
 
@@ -62,7 +62,7 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("record login", "error", err)
 	}
 
-	http.Redirect(w, r, "/admin/routers", http.StatusSeeOther)
+	http.Redirect(w, r, "/admin/", http.StatusSeeOther)
 }
 
 // startSession creates a session row and sets the session cookie.

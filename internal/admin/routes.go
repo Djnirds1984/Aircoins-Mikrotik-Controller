@@ -20,7 +20,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
 	s.mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/admin/routers", http.StatusSeeOther)
+		http.Redirect(w, r, "/admin/", http.StatusSeeOther)
 	})
 
 	// Authentication.
@@ -31,7 +31,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /admin/setup", s.handleSetupSubmit)
 
 	// Router registry.
-	s.mux.HandleFunc("GET /admin/routers", s.requireAuth(s.handleRouterList))
+	s.mux.Handle("GET /admin/", s.requireAuth(s.handleDashboard))
+	s.mux.Handle("GET /admin/routers", s.requireAuth(s.handleRouterList))
 	s.mux.HandleFunc("GET /admin/routers/new", s.requireAuth(s.handleRouterNew))
 	s.mux.HandleFunc("POST /admin/routers", s.requireAuth(s.handleRouterCreate))
 	s.mux.HandleFunc("POST /admin/routers/test", s.requireAuth(s.handleRouterTest))

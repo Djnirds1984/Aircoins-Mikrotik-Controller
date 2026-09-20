@@ -100,5 +100,5 @@ func (s *Server) handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 
 	s.log.Info("created first administrator", "username", username, "ip", httpx.ClientIP(r))
 	setFlash(w, "ok", "Welcome. Add your first router to get started.", s.cfg.CookieSecure)
-	http.Redirect(w, r, "/admin/routers", http.StatusSeeOther)
+	http.Redirect(w, r, "/admin/", http.StatusSeeOther)
 }

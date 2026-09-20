@@ -88,6 +88,7 @@ code { background: var(--skip-bg); padding: 1px 4px; border-radius: 4px; }
 .stat.ok .num { color: var(--ok); }
 .stat.warn .num { color: var(--warn); }
 .stat.fail .num { color: var(--fail); }
+.stat.skip .num { color: var(--skip); }
 
 .form h2 { margin-top: 20px; }
 .form h2:first-of-type { margin-top: 4px; }

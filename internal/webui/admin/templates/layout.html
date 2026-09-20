@@ -8,12 +8,13 @@
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="/admin/routers">
+     <a class="brand" href="/admin/">
     Aircoins
     <span>MikroTik hotspot controller</span>
   </a>
   {{if .Admin}}
   <nav class="nav">
+    <a href="/admin/"{{if eq .Nav "dashboard"}} class="active"{{end}}>Dashboard</a>
     <a href="/admin/routers"{{if eq .Nav "routers"}} class="active"{{end}}>Routers</a>
   </nav>
   <div class="user">

@@ -1,0 +1,62 @@
+{{define "content"}}
+<div class="page-head">
+  <h1>Dashboard</h1>
+  <a class="btn btn-ghost" href="/admin/routers">All routers →</a>
+</div>
+
+{{if .Data.Routers}}
+<div class="stats">
+  <div class="stat"><span class="num">{{.Data.Total}}</span><span class="lbl">total routers</span></div>
+  <div class="stat ok"><span class="num">{{.Data.Healthy}}</span><span class="lbl">verified</span></div>
+  <div class="stat warn"><span class="num">{{.Data.Warn}}</span><span class="lbl">warnings</span></div>
+  <div class="stat fail"><span class="num">{{.Data.Offline}}</span><span class="lbl">probe failed</span></div>
+  <div class="stat skip"><span class="num">{{.Data.Unverified}}</span><span class="lbl">unverified</span></div>
+  <div class="stat skip"><span class="num">{{.Data.Disabled}}</span><span class="lbl">disabled</span></div>
+</div>
+
+{{if gt .Data.Offline 0}}
+<div class="flash fail" role="status">
+  {{.Data.Offline}} router(s) failed their last connection test. Check the Routers page for details.
+</div>
+{{end}}
+
+<section class="card">
+  <h2>Router status</h2>
+  <table class="grid">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Device</th>
+        <th>Status</th>
+        <th>Last probe</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Data.Routers}}
+        <tr>
+          <td>
+            <a href="/admin/routers/{{.ID}}">{{.Name}}</a>
+            {{if not .Enabled}}<span class="badge skip">disabled</span>{{end}}
+          </td>
+          <td>
+            {{dash .BoardName}}
+            <div class="muted">RouterOS {{dash .ROSVersion}}</div>
+          </td>
+          <td><span class="badge {{stateClass .ProbeState}}">{{.ProbeState}}</span></td>
+          <td>{{timeAgo .LastProbeAt}}</td>
+        </tr>
+      {{end}}
+    </tbody>
+  </table>
+</section>
+{{else}}
+<div class="card empty">
+  <h2>No routers yet</h2>
+  <p>
+    Add a MikroTik router to start managing hotspots. The panel will test the API connection
+    before saving, so you find out about firewall issues immediately.
+  </p>
+  <a class="btn btn-primary" href="/admin/routers/new">Add your first router</a>
+</div>
+{{end}}
+{{end}}

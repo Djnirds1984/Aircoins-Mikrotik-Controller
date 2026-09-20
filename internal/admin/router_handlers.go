@@ -9,6 +9,45 @@ import (
 	"github.com/djnirds1984/aircoins-mikrotik-controller/internal/store"
 )
 
+// dashboardView is the data for the dashboard page.
+type dashboardView struct {
+	Total      int
+	Healthy    int
+	Offline    int
+	Unverified int
+	Warn       int
+	Disabled   int
+	Routers    []domain.Router
+}
+
+// handleDashboard shows the overview dashboard.
+func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	routers, err := s.routers.List(r.Context())
+	if err != nil {
+		s.serverError(w, r, "list routers for dashboard", err)
+		return
+	}
+
+	view := &dashboardView{Routers: routers}
+	for _, rt := range routers {
+		view.Total++
+		switch {
+		case !rt.Enabled:
+			view.Disabled++
+		case !rt.Verified:
+			view.Unverified++
+		case rt.ProbeState == domain.ProbeFail:
+			view.Offline++
+		case rt.ProbeState == domain.ProbeWarn:
+			view.Warn++
+		default:
+			view.Healthy++
+		}
+	}
+
+	s.renderPage(w, r, http.StatusOK, "dashboard", s.newPage(w, r, "Dashboard", "dashboard", view))
+}
+
 // handleRouterList shows the router registry.
 func (s *Server) handleRouterList(w http.ResponseWriter, r *http.Request) {
 	routers, err := s.routers.List(r.Context())
