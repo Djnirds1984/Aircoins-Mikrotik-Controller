@@ -30,18 +30,16 @@ cmd/aircoins         the controller (admin panel; portal arrives in a later phas
 cmd/aircoins-probe   standalone connection tester, doubles as a field diagnostic
 ```
 
-## Quick start (no hardware required)
+## Quick start
 
+```sh
+go run ./cmd/aircoins -admin-addr 127.0.0.1:8080 -data-dir ./data-dev
 ```
-go run ./cmd/aircoins -fake-router -admin-addr 127.0.0.1:8080 -data-dir ./data-dev
-```
 
-`-fake-router` points every connection at a simulated RouterOS device so the
-router registry can be demonstrated and tested without a MikroTik. Open
-<http://127.0.0.1:8080/admin>, create the administrator account, then add a
-router with any address (for example `demo.local`).
+Open the admin URL, create the administrator account, then add your first
+MikroTik router and click Test connection before saving.
 
-To exercise the failing paths instead:
+To exercise the probe against example scenarios without hardware:
 
 ```
 go run ./cmd/aircoins-probe -demo=ok
@@ -164,47 +162,36 @@ make build-linux-amd64   # x86_64 mini PCs
 
 The controller ships as a single static binary with no external runtime
 dependencies beyond systemd. SQLite is embedded, so there is nothing else to
-install.
+install — Go is **not** required on the target board. The bundled installer
+auto-detects your CPU architecture and downloads the matching release.
 
-### 1. Get the binary
+### 1. Download and run the installer
 
-**Option A — download a release (recommended):**
-
-```sh
-# Pick the asset that matches your board:
-#   aircoins-linux-arm64  -> Raspberry Pi 3/4/5, Orange Pi 5/5B, NanoPi R5S, etc.
-#   aircoins-linux-armv7  -> 32-bit boards (Orange Pi Zero, etc.)
-#   aircoins-linux-amd64  -> x86_64 mini PCs and VMs
-```
-
-Download the matching asset from the [releases page](https://github.com/Djnirds1984/Aircoins-Mikrotik-Controller/releases)
-and verify the `sha256` checksum that accompanies it.
-
-**Option B — build from source:**
+On the target device, fetch the installer and run it as root:
 
 ```sh
-make build-linux-arm64   # on any machine; cross-compiles correctly
-make build-linux-amd64
+curl -fsSL https://raw.githubusercontent.com/Djnirds1984/Aircoins-Mikrotik-Controller/main/deploy/install.sh | sudo bash
 ```
 
-### 2. Install on the target device
-
-Copy the binary to the board (via `scp`, a USB stick, or build directly on it)
-and run the bundled installer as root:
+Or from a local clone:
 
 ```sh
-sudo ./install.sh ./aircoins-linux-arm64   # use -amd64 or -armv7 as needed
+sudo ./deploy/install.sh
 ```
 
-The script:
+### What the installer does automatically
 
-* creates a system user `aircoins` (no login shell),
-* installs the binary to `/opt/aircoins/aircoins`,
-* writes `/etc/systemd/system/aircoins.service` with security hardening and
-  `CAP_NET_BIND_SERVICE` so the panel can bind port 80,
-* starts and enables the service under systemd.
+1. **Detects your architecture** — arm64 (Raspberry Pi 3/4/5, Orange Pi 5),
+   armv7 (Orange Pi Zero, 32-bit boards), or amd64 (x86_64 mini PCs).
+2. **Downloads the matching release** binary from GitHub.
+3. **Creates a system user** `aircoins` (no login shell).
+4. **Installs the binary** to `/opt/aircoins/aircoins`.
+5. **Installs a systemd unit** at `/etc/systemd/system/aircoins.service`
+   with security hardening and `CAP_NET_BIND_SERVICE` so the panel can
+   bind port 80.
+6. **Starts and enables** the service under systemd.
 
-### 3. First run
+### 2. First run
 
 ```sh
 sudo journalctl -fu aircoins
@@ -217,16 +204,16 @@ http://<panel-ip>:8080/admin
 ```
 
 On first launch the panel has no administrator. Create one, then add your
-MikroTik by clicking **Routers → Add router** and running **Test connection**
-before saving.
+MikroTik by clicking **Routers → Add router**, entering your router's IP,
+API credentials, and clicking **Test connection** before saving.
 
 ### Architecture quick reference
 
-| Board family         | Use binary           | Notes                                          |
+| Board family         | Auto-detected as | Notes                              |
 |---|---|---|
-| Raspberry Pi 3/4/5, Orange Pi 5/5B, Rock 5, NanoPi R5S | `aircoins-linux-arm64` | 64-bit ARM Debian/Armbian |
-| Orange Pi Zero, NanoPi Zero, other 32-bit ARM | `aircoins-linux-armv7` | 32-bit ARM, Raspberry Pi OS Lite 32-bit |
-| x86_64 mini PCs, Intel NUC, VMs      | `aircoins-linux-amd64` | standard Ubuntu/Debian |
+| Raspberry Pi 3/4/5, Orange Pi 5/5B, Rock 5, NanoPi R5S | `arm64` | 64-bit ARM Debian/Armbian |
+| Orange Pi Zero, NanoPi Zero, other 32-bit ARM         | `armv7` | 32-bit ARM, Raspberry Pi OS Lite 32-bit |
+| x86_64 mini PCs, Intel NUC, VMs                       | `amd64` | standard Ubuntu/Debian |
 
 ### Manual installation (no systemd)
 
@@ -234,7 +221,7 @@ If your board does not run systemd you can run the panel directly:
 
 ```sh
 mkdir -p /opt/aircoins /var/lib/aircoins
-cp aircoins-linux-arm64 /opt/aircoins/aircoins
+# Download the appropriate binary manually (see table above)
 chmod +x /opt/aircoins/aircoins
 /opt/aircoins/aircoins -admin-addr :8080 -data-dir /var/lib/aircoins
 ```
@@ -242,6 +229,20 @@ chmod +x /opt/aircoins/aircoins
 The master key and SQLite database live under the `-data-dir` path (`/var/lib/aircoins`
 by default). **Back up `secret.key`** — without it the encrypted router passwords
 stored in the database cannot be recovered.
+
+You can also install just the `aircoins-probe` tool for field diagnostics:
+
+```sh
+# The installer only handles the main binary. For the probe tool, build from source:
+make build-linux-arm64
+sudo cp bin/aircoins-probe-linux-arm64 /usr/local/bin/aircoins-probe
+```
+
+Then run it directly:
+
+```sh
+aircoins-probe -host 192.168.88.1 -user admin -pass secret
+```
 
 ## Roadmap
 

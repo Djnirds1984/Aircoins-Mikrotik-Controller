@@ -1,97 +1,114 @@
 #!/usr/bin/env bash
-# Install the Aircoins hotspot controller on a Debian-based SBC or mini PC
-# (Raspberry Pi OS, Armbian, Ubuntu Server, Debian).
-#
-# Run as root from the directory containing the release binary:
-#
-#   sudo ./install.sh ./aircoins-linux-arm64   # use -amd64 or -armv7 as needed
-#
-# Or let the script pick the correct release asset for the current host:
-#
-#   sudo ./install.sh                          # auto-detects arm64/armv7/amd64
-#
 set -euo pipefail
 
-INSTALL_DIR=/opt/aircoins
-DATA_DIR=/var/lib/aircoins
-SERVICE_USER=aircoins
-SERVICE_NAME=aircoins
-VERSION=${AIRCOINS_VERSION:-latest}
+GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'; BLUE=$'\033[34m'; BOLD=$'\033[1m'; RESET=$'\033[0m'
+info()  { echo "${BLUE}>>>${RESET} $*"; }
+warn()  { echo "${YELLOW}!${RESET} $*"; }
+ok()    { echo "${GREEN}OK${RESET} $*"; }
+err()   { echo "${RED}ERROR${RESET} $*" >&2; }
 
-detect_arch() {
-  local machine
-  machine="$(uname -m)"
-  case "$machine" in
-    aarch64|arm64) echo "arm64" ;;
-    armv7l)        echo "armv7" ;;
-    x86_64|amd64)  echo "amd64" ;;
-    *) echo "unsupported architecture: $machine" >&2; exit 1 ;;
-  esac
-}
+INSTALL_DIR="/opt/aircoins"
+DATA_DIR="/var/lib/aircoins"
+SERVICE_USER="aircoins"
+SERVICE_NAME="aircoins"
+REPO_OWNER="Djnirds1984"
+REPO_NAME="Aircoins-Mikrotik-Controller"
+VERSION="${AIRCOINS_VERSION:-latest}"
 
-ARCH_TAG=$(detect_arch)
-BIN_SRC=${1:-""}
+if [[ $EUID -ne 0 ]]; then err "This installer must be run as root (use sudo)."; exit 1; fi
+if ! command -v wget >/dev/null 2>&1; then err "wget is required but not installed."; exit 1; fi
 
-if [[ -z "$BIN_SRC" || ! -e "$BIN_SRC" ]]; then
-  # No usable path supplied: download the release asset for this architecture.
-  BIN_SRC="/tmp/aircoins-linux-$ARCH_TAG"
-  echo "downloading aircoins-$VERSION for linux-$ARCH_TAG ..."
-  wget -q "https://github.com/Djnirds1984/Aircoins-Mikrotik-Controller/releases/download/$VERSION/aircoins-linux-$ARCH_TAG" -O "$BIN_SRC"
-  chmod +x "$BIN_SRC"
-fi
+machine="$(uname -m)"
+case "$machine" in
+  aarch64|arm64) ARCH_TAG="arm64" ;;
+  armv7l|armv6l) ARCH_TAG="armv7" ;;
+  x86_64|amd64)  ARCH_TAG="amd64" ;;
+  *) err "Unsupported architecture: $machine"; err "Supported: arm64, armv7, amd64"; exit 1 ;;
+esac
+info "Detected architecture: ${ARCH_TAG} (${machine})"
 
-if [[ $EUID -ne 0 ]]; then
-  echo "this script must run as root" >&2
-  exit 1
-fi
-
-if [[ ! -x "$BIN_SRC" ]]; then
-  echo "usage: $0 [path-to-aircoins-binary]" >&2
-  echo "       the binary must match linux-$ARCH_TAG (aarch64/armv7/amd4)" >&2
-  exit 1
-fi
-
-echo "creating the $SERVICE_USER service account"
-useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER" 2>/dev/null || \
-  echo "  (account already exists)"
-
-echo "creating $DATA_DIR"
-install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0750 "$DATA_DIR"
-
-echo "installing the binary to $INSTALL_DIR"
-install -d -m 0755 "$INSTALL_DIR"
-install -m 0755 "$BIN_SRC" "$INSTALL_DIR/$SERVICE_NAME"
-
-echo "installing the systemd unit"
-install -m 0644 "$(dirname "$0")/$SERVICE_NAME.service" "/etc/systemd/system/$SERVICE_NAME.service"
-
-systemctl daemon-reload
-
-if systemctl is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
-  echo "restarting $SERVICE_NAME"
-  systemctl restart "$SERVICE_NAME"
+if [[ "$VERSION" == "latest" ]]; then
+  DOWNLOAD_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/aircoins-linux-${ARCH_TAG}"
 else
-  echo "enabling and starting $SERVICE_NAME"
-  systemctl enable --now "$SERVICE_NAME"
+  DOWNLOAD_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}/aircoins-linux-${ARCH_TAG}"
 fi
 
-sleep 2
-systemctl --no-pager --lines=0 status "$SERVICE_NAME" || true
+BIN_TMP="/tmp/aircoins-install-tmp"
+info "Downloading aircoins ${VERSION} for linux-${ARCH_TAG} ..."
+wget -q --tries=3 --timeout=30 "$DOWNLOAD_URL" -O "$BIN_TMP" || { err "Download failed: $DOWNLOAD_URL"; err "Check release exists or internet access."; exit 1; }
+chmod +x "$BIN_TMP"
+info "Downloaded $(wc -c < "$BIN_TMP" | awk '{printf "%d", $1/1024}') KiB"
 
+if ! head -c 4 "$BIN_TMP" | od -An -tx1 | grep -q "7f 45 4c 46"; then
+  err "Not a valid ELF binary."; rm -f "$BIN_TMP"; exit 1
+fi
+ok "Binary verified"
+
+info "Creating system user '${SERVICE_USER}' ..."
+useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER" 2>/dev/null || warn "  (user exists)"
+ok "Service user ready"
+
+info "Creating directories ..."
+install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0750 "$DATA_DIR"
+install -d -m 0755 "$INSTALL_DIR"
+ok "Directories created"
+
+info "Installing binary ..."
+install -m 0755 "$BIN_TMP" "$INSTALL_DIR/$SERVICE_NAME"
+rm -f "$BIN_TMP"
+ok "Binary installed"
+
+info "Installing systemd unit ..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SERVICE_FILE="$SCRIPT_DIR/$SERVICE_NAME.service"
+if [[ ! -f "$SERVICE_FILE" ]]; then
+  warn "Service file not found locally. Fetching from GitHub ..."
+  wget -q "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/deploy/${SERVICE_NAME}.service" -O /tmp/"$SERVICE_NAME".service
+  SERVICE_FILE="/tmp/${SERVICE_NAME}.service"
+fi
+install -m 0644 "$SERVICE_FILE" "/etc/systemd/system/$SERVICE_NAME.service"
+[[ -f /tmp/$SERVICE_NAME.service ]] && rm -f /tmp/$SERVICE_NAME.service
+ok "Systemd unit installed"
+
+info "Enabling and starting ${SERVICE_NAME} ..."
+systemctl daemon-reload
+systemctl enable "$SERVICE_NAME" 2>/dev/null || true
+systemctl restart "$SERVICE_NAME"
+sleep 2
+
+echo ""
+if systemctl is-active --quiet "$SERVICE_NAME"; then
+  ok "Service is running"
+  systemctl --no-pager --lines=5 status "$SERVICE_NAME" || true
+else
+  err "Service failed to start. Check logs: journalctl -u $SERVICE_NAME -n 50"
+  exit 1
+fi
+
+PANEL_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 cat <<EOF
 
-Installed. Next steps:
+============================================================
+ Aircoins Mikrotik Controller -- installed successfully
+============================================================
 
-  1. Edit /etc/systemd/system/$SERVICE_NAME.service and set
-     -base-url to the address hotspot clients use to reach this panel, then
-       systemctl daemon-reload && systemctl restart $SERVICE_NAME
-  2. Open http://$(hostname -I | awk '{print $1}'):8080/admin and create the
-     administrator account.
-  3. Allow the panel in the router's walled garden so pre-authentication clients
-     can reach it:
-       /ip hotspot walled-garden add dst-host=<panel host> action=allow
-       /ip hotspot walled-garden ip add dst-address=<panel ip> action=accept
-  4. The master key is generated at $DATA_DIR/secret.key. Back it up: without it
-     the stored router passwords cannot be decrypted.
+Admin panel:   http://${PANEL_IP}:8080/admin
+Data dir:      ${DATA_DIR}
+Install dir:   ${INSTALL_DIR}
+
+First steps:
+  1. Open http://${PANEL_IP}:8080/admin in your browser
+  2. Create administrator account
+  3. Add your Mikrotik router (Routers -> Add router)
+  4. Enable API on router: /ip service enable api
+
+Important:
+  - Back up ${DATA_DIR}/secret.key -- needed to decrypt router passwords
+  - Edit systemd unit to change ports: systemctl edit --full $SERVICE_NAME
+
+Commands:
+  sudo journalctl -fu $SERVICE_NAME      # follow logs
+  sudo systemctl restart $SERVICE_NAME    # restart
+  sudo systemctl status  $SERVICE_NAME    # status
 
 EOF

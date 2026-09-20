@@ -21,42 +21,42 @@ cd Aircoins-Mikrotik-Controller
 go mod download
 ```
 
-## Step 3: First Run (Development Mode)
+## Step 3: Test Connection to Your Real Router
 
-Start the controller in development mode with a simulated router:
+First, test connectivity to your actual Mikrotik board:
 
 ```bash
-go run ./cmd/aircoins -fake-router -admin-addr 127.0.0.1:8080 -data-dir ./data-dev
+go run ./cmd/aircoins-probe -host 192.168.88.1 -user admin -pass your_real_password
+```
+
+For write permission testing (tests API write access):
+
+```bash
+go run ./cmd/aircoins-probe -host 192.168.88.1 -user admin -pass your_real_password -allow-write
+```
+
+## Step 4: First Run (Development Mode)
+
+Start the controller pointing at your real hardware:
+
+```bash
+go run ./cmd/aircoins -admin-addr 127.0.0.1:8080 -data-dir ./data-dev
 ```
 
 Flags:
-- `-fake-router`: Simulates a Mikrotik device for testing
 - `-admin-addr 127.0.0.1:8080`: Admin panel address
 - `-data-dir ./data-dev`: Database and config storage location
 
-## Step 4: Access the Web Panel
+## Step 5: Access the Web Panel and Add Router
 
 1. Open a browser to: `http://127.0.0.1:8080/admin`
 2. Complete the first-run setup wizard to create an admin account
-3. Add your first router via **Routers → Add router**
-
-## Step 5: Test Against Real Hardware
-
-Test connection to your Mikrotik router:
-
-```bash
-go run ./cmd/aircoins-probe -host 192.168.88.1 -user admin -pass your_password
-```
-
-With write permissions testing:
-
-```bash
-go run ./cmd/aircoins-probe -host 192.168.88.1 -user admin -pass your_password -allow-write
-```
+3. Add your real router via **Routers → Add router** using the real IP, credentials, and API port
+4. Use the **Test Connection** feature to verify the connection before saving
 
 ## Step 6: Production Deployment
 
-Build for your target architecture:
+Build for your target architecture (optional - the installer can download pre-built binaries):
 
 ```bash
 make build-linux-amd64   # x86_64 mini PCs
@@ -68,21 +68,29 @@ Binaries are placed in `bin/`.
 
 ### Install on SBC/Mini PC
 
-Copy the appropriate binary to your device:
+The easiest way to install on your target device is the one-command installer,
+which auto-detects your architecture:
 
 ```bash
-scp bin/aircoins-linux-arm64 user@your-device-ip:~/
-ssh user@your-device-ip
-sudo ./install.sh ./aircoins-linux-arm64
+# On the target device:
+curl -fsSL https://raw.githubusercontent.com/Djnirds1984/Aircoins-Mikrotik-Controller/main/deploy/install.sh | sudo bash
 ```
 
-The install script:
-- Creates a system user `aircoins`
-- Installs the binary to `/opt/aircoins/aircoins`
-- Sets up systemd service with security hardening
-- Starts the service automatically
+Or from a local clone:
 
-Access: `http://<device-ip>:8080/admin`
+```bash
+sudo ./deploy/install.sh
+```
+
+The installer will:
+- Detect your CPU architecture (arm64, armv7, or amd64)
+- Download the matching release binary from GitHub
+- Create a system user `aircoins`
+- Install the binary to `/opt/aircoins/aircoins`
+- Set up a systemd service with security hardening
+- Start and enable the service
+
+Access the panel at: `http://<device-ip>:8080/admin`
 
 ## Step 7: Configure Mikrotik Router
 
@@ -99,7 +107,9 @@ API user must have `read`, `write`, and `policy` permissions.
 - Ensure port 8080 is not already in use
 - Verify Go version: `go version` (must be 1.26+)
 - Check firewall settings when accessing from another device
-- View logs: `sudo journalctl -fu aircoins`
+- View development logs in terminal, or `sudo journalctl -fu aircoins` in production
+- Verify API service is enabled on Mikrotik: `/ip service enable api`
+- Confirm API user has read/write/policy permissions
 
 ## Directory Structure
 
