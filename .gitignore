@@ -1,0 +1,23 @@
+# Build artifacts
+/bin/
+/dist/
+
+# Runtime state: the database and the generated master key must never be
+# committed.
+/data/
+/data-dev/
+*.db
+*.db-shm
+*.db-wal
+secret.key
+
+# Coverage and profiling output
+*.out
+*.prof
+
+# Editors and OS noise
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

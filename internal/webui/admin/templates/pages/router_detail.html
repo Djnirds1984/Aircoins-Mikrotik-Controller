@@ -1,0 +1,102 @@
+{{define "content"}}
+<div class="page-head">
+  <h1>
+    {{.Data.Router.Name}}
+    <span class="badge {{stateClass .Data.Router.ProbeState}}">{{.Data.Router.ProbeState}}</span>
+    {{if not .Data.Router.Enabled}}<span class="badge skip">disabled</span>{{end}}
+  </h1>
+  <div class="head-actions">
+    <a class="btn btn-ghost" href="/admin/routers">Back</a>
+    <a class="btn" href="/admin/routers/{{.Data.Router.ID}}/edit">Edit</a>
+    <form method="post" action="/admin/routers/{{.Data.Router.ID}}/probe" class="inline">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}">
+      <button class="btn" type="submit">Re-run connection test</button>
+    </form>
+    <form method="post" action="/admin/routers/{{.Data.Router.ID}}/toggle" class="inline">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}">
+      <button class="btn btn-ghost" type="submit">{{if .Data.Router.Enabled}}Disable{{else}}Enable{{end}}</button>
+    </form>
+    <form method="post" action="/admin/routers/{{.Data.Router.ID}}/delete" class="inline">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}">
+      <button class="btn btn-danger" type="submit"
+              data-confirm="Remove {{.Data.Router.Name}} from the panel? The router itself is not changed.">Delete</button>
+    </form>
+  </div>
+</div>
+
+{{if and .Data.Router.VerifyOverride (not .Data.Router.Verified)}}
+  <div class="flash warn">
+    Saved without verification. Run a connection test to confirm the panel can manage this router.
+  </div>
+{{end}}
+
+<div class="columns">
+  <section class="card">
+    <h2>Management</h2>
+    <dl class="kv">
+      <div><dt>API endpoint</dt><dd class="mono">{{.Data.Router.Endpoint}}{{if .Data.Router.APITLS}} (TLS){{end}}</dd></div>
+      <div><dt>API user</dt><dd>{{dash .Data.Router.APIUser}}</dd></div>
+      <div><dt>Password</dt><dd class="muted">stored encrypted</dd></div>
+      <div><dt>FTP host</dt><dd>{{dash .Data.Router.FTPHost}}</dd></div>
+      <div><dt>Portal token</dt><dd class="mono">{{dash .Data.Router.PortalToken}}</dd></div>
+      <div><dt>Portal URL</dt><dd class="mono">{{dash .Data.PortalURL}}</dd></div>
+      <div><dt>Stub hash</dt><dd class="mono">{{dash .Data.Router.StubHash}}</dd></div>
+      <div><dt>Last seen</dt><dd>{{timeAgo .Data.Router.LastSeenAt}}</dd></div>
+      <div><dt>Last probe</dt><dd>{{formatTimeOr .Data.Router.LastProbeAt}}</dd></div>
+      <div><dt>Added</dt><dd>{{formatTime .Data.Router.CreatedAt}}</dd></div>
+      <div><dt>Notes</dt><dd>{{dash .Data.Router.Notes}}</dd></div>
+    </dl>
+    {{if .Data.StubHint}}<p class="muted">{{.Data.StubHint}}</p>{{end}}
+  </section>
+
+  <section class="card">
+    <h2>Cached device facts</h2>
+    <dl class="kv">
+      <div><dt>Identity</dt><dd>{{dash .Data.Router.Identity}}</dd></div>
+      <div><dt>Board</dt><dd>{{dash .Data.Router.BoardName}}</dd></div>
+      <div><dt>Model</dt><dd>{{dash .Data.Router.Model}}</dd></div>
+      <div><dt>RouterOS</dt><dd>{{dash .Data.Router.ROSVersion}}</dd></div>
+      <div><dt>Architecture</dt><dd>{{dash .Data.Router.Arch}}</dd></div>
+      <div><dt>License</dt><dd>{{dash .Data.Router.LicenseLevel}}</dd></div>
+      <div><dt>Free flash</dt><dd>{{bytes .Data.Router.FreeHDDSpace}}</dd></div>
+      <div><dt>Uptime</dt><dd>{{.Data.Router.UptimeSeconds}} s</dd></div>
+      <div><dt>Clock offset</dt><dd>{{.Data.Router.ClockOffsetSecs}} s</dd></div>
+    </dl>
+    <p class="muted">Refreshed by probes and health polls.</p>
+  </section>
+</div>
+
+<section class="card">
+  <h2>Last connection test</h2>
+  {{if .Data.Report}}
+    {{template "probe_report" (probeView .Data.Report)}}
+  {{else}}
+    <p class="muted">No connection test is recorded yet.</p>
+  {{end}}
+</section>
+
+<section class="card">
+  <h2>Hotspot servers</h2>
+  {{if .Data.Servers}}
+    <table class="grid">
+      <thead><tr><th>Name</th><th>Interface</th><th>Address pool</th><th>Profile</th><th>Synced</th></tr></thead>
+      <tbody>
+        {{range .Data.Servers}}
+          <tr>
+            <td>{{.Name}}{{if .Disabled}} <span class="badge skip">disabled</span>{{end}}</td>
+            <td class="mono">{{dash .Interface}}</td>
+            <td class="mono">{{dash .AddressPool}}</td>
+            <td>{{dash .Profile}}</td>
+            <td>{{timeAgo (ptrTime .SyncedAt)}}</td>
+          </tr>
+        {{end}}
+      </tbody>
+    </table>
+  {{else}}
+    <p class="muted">
+      No inventory cached yet. Re-run the connection test to read the hotspot servers
+      from the device.
+    </p>
+  {{end}}
+</section>
+{{end}}
