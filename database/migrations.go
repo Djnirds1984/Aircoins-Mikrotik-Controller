@@ -98,6 +98,12 @@ CREATE INDEX IF NOT EXISTS vouchers_batch_idx ON vouchers(batch);
 CREATE INDEX IF NOT EXISTS vouchers_router_idx ON vouchers(router_id);
 CREATE INDEX IF NOT EXISTS vouchers_expiry_idx ON vouchers(status, expires_at)`
 
+const (
+	routersTransportDDL = `ALTER TABLE routers ADD COLUMN transport TEXT NOT NULL DEFAULT 'auto'`
+	routersRestPortDDL  = `ALTER TABLE routers ADD COLUMN rest_port INTEGER NOT NULL DEFAULT 0`
+	routersLastXDDL     = `ALTER TABLE routers ADD COLUMN last_transport TEXT NOT NULL DEFAULT ''`
+)
+
 // migrations is the ordered list of schema changes. Append a new entry instead
 // of editing an existing one: applied versions are never replayed.
 var migrations = []migration{
@@ -111,6 +117,15 @@ var migrations = []migration{
 			sessionsIndexesDDL,
 			vouchersDDL,
 			vouchersIndexesDDL,
+		},
+	},
+	{
+		version: 2,
+		name:    "router-transport",
+		statements: []string{
+			routersTransportDDL,
+			routersRestPortDDL,
+			routersLastXDDL,
 		},
 	},
 }

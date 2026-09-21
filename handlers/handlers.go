@@ -129,6 +129,8 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("POST /portal/login", h.PortalAuthenticate)
 	mux.HandleFunc("GET /portal/status", h.PortalStatus)
 
+	// REST API (RouterOS v7+ compatible).
+	h.RoutesAPI(mux)
 	return h.recoverer(h.logRequests(h.securityHeaders(h.csrfGuard(mux))))
 }
 
