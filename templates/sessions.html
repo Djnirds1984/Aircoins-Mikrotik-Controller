@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · {{.PortalName}}</title>
+{{template "styles" .}}
+</head>
+<body>
+{{template "nav" .}}
+<main class="wrap">
+  {{template "flash" .}}
+
+  <div class="page-head">
+    <div>
+      <h1>Session history</h1>
+      <p class="sub">{{humanCount .Total}} record(s) · page {{.PageNo}} of {{.Pages}}</p>
+    </div>
+    <div class="actions">
+      <a class="btn" href="/">Dashboard</a>
+      <a class="btn" href="/routers">Routers</a>
+    </div>
+  </div>
+
+  <section class="card">
+    <h2>Filters</h2>
+    <form method="get" action="/sessions">
+      <div class="form-grid">
+        <div class="field">
+          <label for="router">Router</label>
+          <select id="router" name="router">
+            <option value="">All routers</option>
+            {{range .Routers}}
+            <option value="{{.ID}}"{{if eq $.Filter.RouterID .ID}} selected{{end}}>{{.Name}}</option>
+            {{end}}
+          </select>
+        </div>
+        <div class="field">
+          <label for="status">Status</label>
+          <select id="status" name="status">
+            <option value="">Open and closed</option>
+            <option value="open"{{if eq $.Filter.Status "open"}} selected{{end}}>Open</option>
+            <option value="closed"{{if eq $.Filter.Status "closed"}} selected{{end}}>Closed</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="q">User, IP or MAC</label>
+          <input id="q" name="q" value="{{.Filter.Query}}" placeholder="client, 192.168.88.10, AA:BB:CC">
+        </div>
+        <div class="field">
+          <label for="mac">MAC address</label>
+          <input id="mac" name="mac" value="{{.Filter.MAC}}" placeholder="AA:BB:CC:DD:EE:FF">
+        </div>
+      </div>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn primary" type="submit">Apply filters</button>
+        <a class="btn" href="/sessions">Clear</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <h2>Hotspot sessions</h2>
+    {{if .Sessions}}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>User</th><th>Router</th><th>Address</th><th>MAC</th><th class="num">Traffic</th><th>Duration</th><th>Seen</th></tr>
+        </thead>
+        <tbody>
+        {{range .Sessions}}
+          <tr>
+            <td class="mono"><strong>{{if .Username}}{{.Username}}{{else}}—{{end}}</strong>
+              <div class="muted" style="font-size:.76rem">{{.Server}} · {{.LoginBy}}</div>
+            </td>
+            <td>{{if .RouterName}}{{.RouterName}}{{else}}<span class="muted">router {{.RouterID}}</span>{{end}}</td>
+            <td class="mono">{{.Address}}</td>
+            <td class="mono">{{.MACAddress}}</td>
+            <td class="num">{{humanBytes .TotalBytes}}</td>
+            <td class="nowrap">{{durationLabel .Duration}}</td>
+            <td class="nowrap">{{if .Open}}<span class="badge green">open</span>{{else}}<span class="badge slate">closed</span>{{end}}</td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    <div class="btn-row" style="margin-top:12px">
+      {{if gt .PageNo 1}}<a class="btn" href="{{.PrevURL}}">Previous</a>{{end}}
+      {{if lt .PageNo .Pages}}<a class="btn" href="{{.NextURL}}">Next</a>{{end}}
+    </div>
+    {{else}}
+      <div class="empty">No sessions match these filters yet.</div>
+    {{end}}
+  </section>
+</main>
+{{template "footer" .}}
+</body>
+</html>

@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Router.Name}} · {{.PortalName}}</title>
+{{template "styles" .}}
+</head>
+<body>
+{{template "nav" .}}
+<main class="wrap">
+  {{template "flash" .}}
+
+  <div class="page-head">
+    <div>
+      <h1>{{.Router.Name}}</h1>
+      <p class="sub">
+        <span class="mono">{{.Router.Endpoint}}</span> ·
+        <span class="{{statusClass .Router.LastStatus}}">{{.Router.LastStatus}}</span>
+        {{if .Router.Location}} · {{.Router.Location}}{{end}}
+        {{if .Router.LastSeenAt}} · last seen {{sinceLabel .Router.LastSeenAt}}{{end}}
+      </p>
+    </div>
+    <div class="actions">
+      <a class="btn" href="/routers">All routers</a>
+      <form class="inline-form" method="post" action="/routers/{{.Router.ID}}/refresh">
+        {{template "csrf" .}}<button class="btn" type="submit">Refresh sessions</button>
+      </form>
+      <form class="inline-form" method="post" action="/routers/{{.Router.ID}}/test">
+        {{template "csrf" .}}<button class="btn primary" type="submit">Test connection</button>
+      </form>
+    </div>
+  </div>
+
+  {{if not .Live}}
+  <div class="alert warn">
+    <strong>Showing locally cached data.</strong> {{.LiveHint}}
+    <div class="muted" style="font-size:.82rem; margin-top:4px">Device reported: {{.LiveError}}</div>
+  </div>
+  {{end}}
+
+  {{if .Warnings}}
+  <div class="alert warn">
+    <strong>Partial device data.</strong>
+    <ul class="notice-list">
+      {{range .Warnings}}<li>{{.}}</li>{{end}}
+    </ul>
+  </div>
+  {{end}}
+
+  {{if .Live}}
+  <section class="grid cols-4">
+    <div class="card stat">
+      <span class="label">Identity</span>
+      <span class="value" style="font-size:1.2rem">{{default .Info.Identity .Router.Name}}</span>
+      <span class="meta">RouterOS {{default .Info.Version "unknown"}} · {{default .Info.BoardName "unknown board"}}</span>
+    </div>
+    <div class="card stat">
+      <span class="label">Uptime</span>
+      <span class="value" style="font-size:1.2rem">{{default .Info.Uptime "unknown"}}</span>
+      <span class="meta">{{default .Info.Architecture "unknown architecture"}}</span>
+    </div>
+    <div class="card stat">
+      <span class="label">CPU load</span>
+      <span class="value">{{.Info.CPULoad}}%</span>
+      <span class="meta">free memory {{humanBytes .Info.FreeMemory}} of {{humanBytes .Info.TotalMemory}}</span>
+    </div>
+    <div class="card stat">
+      <span class="label">Clients</span>
+      <span class="value">{{humanCount (len .Clients)}}</span>
+      <span class="meta">{{len .Profiles}} profile(s) · {{len .Bindings}} IP binding(s){{if .Sync.Closed}} · {{.Sync.Closed}} stale closed{{end}}</span>
+    </div>
+  </section>
+  {{else}}
+  <section class="grid cols-4">
+    <div class="card stat">
+      <span class="label">Cached open sessions</span>
+      <span class="value">{{humanCount (len .CachedClients)}}</span>
+      <span class="meta">tracked locally until the device answers again</span>
+    </div>
+    <div class="card stat">
+      <span class="label">Vouchers</span>
+      <span class="value">{{humanCount .VoucherStats.Total}}</span>
+      <span class="meta">{{.VoucherStats.Unused}} unused · {{.VoucherStats.Pushed}} provisioned</span>
+    </div>
+  </section>
+  {{end}}
+  <section class="card">
+    <h2>Active hotspot clients</h2>
+    <p class="hint">Read live from <span class="mono">/ip/hotspot/active/print</span>. Disconnecting or blocking takes effect on the device immediately.</p>
+    {{if .Live}}
+      {{if .Clients}}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>User</th><th>IP address</th><th>MAC</th><th>Uptime</th><th class="num">Data</th><th>Login</th><th></th></tr>
+          </thead>
+          <tbody>
+          {{range .Clients}}
+            <tr>
+              <td><strong>{{default .User "anonymous"}}</strong>
+                {{if .Comment}}<div class="muted" style="font-size:.78rem">{{.Comment}}</div>{{end}}
+              </td>
+              <td class="mono">{{.Address}}</td>
+              <td class="mono">{{default .MACAddress "unknown"}}</td>
+              <td class="nowrap">{{default .Uptime "0s"}}</td>
+              <td class="num nowrap">{{humanBytes .TotalBytes}}
+                <div class="muted" style="font-size:.76rem">down {{humanBytes .BytesIn}} / up {{humanBytes .BytesOut}}</div>
+              </td>
+              <td class="muted" style="font-size:.82rem">{{default .LoginBy "—"}}</td>
+              <td class="num nowrap">
+                <form class="inline-form" method="post" action="/routers/{{$.Router.ID}}/sessions/disconnect">
+                  {{template "csrf" $}}
+                  <input type="hidden" name="session_key" value="{{.ID}}">
+                  <input type="hidden" name="username" value="{{.User}}">
+                  <input type="hidden" name="mac" value="{{.MACAddress}}">
+                  <label class="muted" style="font-size:.78rem"><input type="checkbox" name="block" value="1"> block</label>
+                  <button class="btn small danger" type="submit">Disconnect</button>
+                </form>
+              </td>
+            </tr>
+          {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+        <div class="empty">No client is logged in to this hotspot right now.</div>
+      {{end}}
+    {{else}}
+      {{if .CachedClients}}
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>User</th><th>IP address</th><th>MAC</th><th>Last seen</th><th class="num">Data</th></tr></thead>
+          <tbody>
+          {{range .CachedClients}}
+            <tr>
+              <td><strong>{{default .Username "anonymous"}}</strong></td>
+              <td class="mono">{{.Address}}</td>
+              <td class="mono">{{default .MACAddress "unknown"}}</td>
+              <td class="nowrap">{{sinceLabel .LastSeenAt}}</td>
+              <td class="num nowrap">{{humanBytes .TotalBytes}}</td>
+            </tr>
+          {{end}}
+          </tbody>
+        </table>
+      </div>
+      <p class="hint" style="margin-top:10px">Cached clients cannot be disconnected while the device is unreachable.</p>
+      {{else}}
+        <div class="empty">No cached sessions for this device.</div>
+      {{end}}
+    {{end}}
+  </section>
+  <section class="grid cols-2" style="margin-top:16px">
+    <div class="card">
+      <h2>Blocked devices <span class="badge slate">IP bindings</span></h2>
+      <p class="hint">Blocking adds an <span class="mono">/ip/hotspot/ip-binding</span> of type <span class="mono">blocked</span> for that client MAC address.</p>
+      {{if .Live}}
+        {{if .Bindings}}
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>MAC</th><th>Type</th><th>Comment</th><th></th></tr></thead>
+            <tbody>
+            {{range .Bindings}}
+              <tr>
+                <td class="mono">{{default .MACAddress .Address}}</td>
+                <td>{{if .Blocked}}<span class="badge red">blocked</span>{{else}}<span class="badge blue">{{default .Type "bypassed"}}</span>{{end}}</td>
+                <td class="muted" style="font-size:.82rem">{{default .Comment "—"}}</td>
+                <td class="num">
+                  <form class="inline-form" method="post" action="/routers/{{$.Router.ID}}/unblock">
+                    {{template "csrf" $}}
+                    <input type="hidden" name="binding_id" value="{{.ID}}">
+                    <button class="btn small" type="submit">Remove</button>
+                  </form>
+                </td>
+              </tr>
+            {{end}}
+            </tbody>
+          </table>
+        </div>
+        {{else}}
+          <div class="empty">No IP bindings on this device.</div>
+        {{end}}
+      {{else}}
+        <div class="empty">Connect to the device to manage its IP bindings.</div>
+      {{end}}
+
+      <form method="post" action="/routers/{{.Router.ID}}/block" style="margin-top:14px">
+        {{template "csrf" .}}
+        <div class="form-grid">
+          <div class="field">
+            <label for="mac">Block a MAC address</label>
+            <input id="mac" name="mac" placeholder="AA:BB:CC:DD:EE:FF" required>
+          </div>
+          <div class="field">
+            <label for="comment">Reason (optional)</label>
+            <input id="comment" name="comment" placeholder="Unpaid guest">
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:10px">
+          <button class="btn danger" type="submit">Block device</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Hotspot user profiles</h2>
+      <p class="hint">Vouchers are provisioned with the profile named here; time and data limits are pushed as <span class="mono">limit-uptime</span> and <span class="mono">limit-bytes-total</span>.</p>
+      {{if .Live}}
+        {{if .Profiles}}
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Profile</th><th class="num">Shared users</th><th>Rate limit</th><th>Session timeout</th></tr></thead>
+            <tbody>
+            {{range .Profiles}}
+              <tr>
+                <td><strong>{{.Name}}</strong></td>
+                <td class="num">{{.SharedUsers}}</td>
+                <td class="mono">{{default .RateLimit "unlimited"}}</td>
+                <td class="muted">{{default .SessionTime "—"}}</td>
+              </tr>
+            {{end}}
+            </tbody>
+          </table>
+        </div>
+        {{else}}
+          <div class="empty">No hotspot user profiles found (is the hotspot package enabled?).</div>
+        {{end}}
+      {{else}}
+        <div class="empty">Profiles are read live from the device.</div>
+      {{end}}
+    </div>
+  </section>
+  <section class="card" style="margin-top:16px">
+    <h2>Vouchers bound to {{.Router.Name}}</h2>
+    <p class="hint">{{humanCount .VoucherStats.Total}} key(s): {{.VoucherStats.Unused}} unused ·
+      {{.VoucherStats.Active}} active · {{.VoucherStats.Used}} used · {{.VoucherStats.Pushed}} provisioned on the device</p>
+
+    <form method="post" action="/vouchers/generate" style="margin-bottom:16px">
+      {{template "csrf" .}}
+      <input type="hidden" name="lock_router_id" value="{{.Router.ID}}">
+      <input type="hidden" name="router_id" value="{{.Router.ID}}">
+      <div class="form-grid">
+        <div class="field">
+          <label for="quantity">How many keys</label>
+          <input id="quantity" name="quantity" value="{{.VoucherForm.Quantity}}" inputmode="numeric">
+          {{with .VoucherForm.Errors.quantity}}<span class="error">{{.}}</span>{{end}}
+        </div>
+        <div class="field">
+          <label for="batch">Batch name</label>
+          <input id="batch" name="batch" value="{{.VoucherForm.Batch}}">
+        </div>
+        <div class="field">
+          <label for="prefix">Code prefix</label>
+          <input id="prefix" name="prefix" value="{{.VoucherForm.Prefix}}">
+        </div>
+        <div class="field">
+          <label for="profile">Hotspot profile</label>
+          <input id="profile" name="profile" value="{{.VoucherForm.Profile}}" placeholder="default">
+        </div>
+        <div class="field">
+          <label for="duration_minutes">Time limit (minutes)</label>
+          <input id="duration_minutes" name="duration_minutes" value="{{.VoucherForm.Duration}}" inputmode="numeric">
+          {{with .VoucherForm.Errors.duration_minutes}}<span class="error">{{.}}</span>{{end}}
+        </div>
+        <div class="field">
+          <label for="data_limit_mb">Data limit (MB)</label>
+          <input id="data_limit_mb" name="data_limit_mb" value="{{.VoucherForm.DataLimit}}" inputmode="numeric">
+          {{with .VoucherForm.Errors.data_limit_mb}}<span class="error">{{.}}</span>{{end}}
+        </div>
+        <div class="field">
+          <label for="device_limit">Devices per key</label>
+          <input id="device_limit" name="device_limit" value="{{.VoucherForm.DeviceLimit}}" inputmode="numeric">
+          {{with .VoucherForm.Errors.device_limit}}<span class="error">{{.}}</span>{{end}}
+        </div>
+        <div class="field">
+          <label for="price">Price</label>
+          <input id="price" name="price" value="{{.VoucherForm.Price}}" inputmode="decimal">
+          {{with .VoucherForm.Errors.price}}<span class="error">{{.}}</span>{{end}}
+        </div>
+      </div>
+      <div class="btn-row" style="margin-top:12px">
+        <label class="field check">
+          <input type="checkbox" name="push" value="1"{{if .VoucherForm.Push}} checked{{end}}>
+          <span>Provision on the router right away</span>
+        </label>
+        <button class="btn primary" type="submit">Generate vouchers</button>
+      </div>
+    </form>
+
+    {{if .Vouchers}}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Code</th><th>Limits</th><th>Router</th><th>Status</th><th class="num">Uses</th><th>Valid until</th><th></th></tr>
+        </thead>
+        <tbody>{{template "voucherRows" .}}</tbody>
+      </table>
+    </div>
+    <p class="hint" style="margin-top:10px">Showing the 25 most recent keys. <a href="/vouchers?router={{.Router.ID}}">See all</a></p>
+    {{else}}
+      <div class="empty">No vouchers for this router yet. Generate a batch above.</div>
+    {{end}}
+  </section>
+  <section class="grid cols-2" style="margin-top:16px">
+    <div class="card">
+      <h2>Connection details</h2>
+      <dl class="kv">
+        <dt>Endpoint</dt><dd class="mono">{{.Router.Endpoint}}</dd>
+        <dt>API user</dt><dd class="mono">{{.Router.Username}}</dd>
+        <dt>Password</dt><dd class="mono">{{.Router.MaskedPassword}}</dd>
+        <dt>Transport</dt><dd>{{if .Router.UseTLS}}API-SSL{{if .Router.VerifyTLS}} (certificate verified){{else}} (self signed accepted){{end}}{{else}}plain API{{end}}</dd>
+        <dt>Portal tag</dt><dd>{{default .Router.PortalTag "not set"}}{{if .Router.DefaultPortal}} · default portal{{end}}</dd>
+        <dt>Last seen</dt><dd>{{timeLabel .Router.LastSeenAt}}</dd>
+        <dt>Registered</dt><dd>{{.Router.CreatedAt.Format "02 Jan 2006 15:04"}}</dd>
+        {{if .Router.Notes}}<dt>Notes</dt><dd>{{.Router.Notes}}</dd>{{end}}
+      </dl>
+    </div>
+
+    <div class="card">
+      <h2>Edit router</h2>
+      <p class="hint">Leave the password blank to keep the stored credential.</p>
+      <form method="post" action="/routers/{{.Router.ID}}">
+        {{template "csrf" .}}
+        <div class="form-grid">
+          <div class="field">
+            <label for="ename">Name</label>
+            <input id="ename" name="name" value="{{.Form.Name}}" required>
+            {{with .Form.Errors.name}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="ehost">IP / hostname</label>
+            <input id="ehost" name="host" value="{{.Form.Host}}" required>
+          </div>
+          <div class="field">
+            <label for="eport">API port</label>
+            <input id="eport" name="port" value="{{.Form.Port}}" required>
+          </div>
+          <div class="field">
+            <label for="eusername">API user</label>
+            <input id="eusername" name="username" value="{{.Form.Username}}" required>
+          </div>
+          <div class="field">
+            <label for="epassword">New API password</label>
+            <input id="epassword" name="password" type="password" autocomplete="new-password" placeholder="unchanged">
+          </div>
+          <div class="field">
+            <label for="elocation">Location</label>
+            <input id="elocation" name="location" value="{{.Form.Location}}">
+          </div>
+          <div class="field">
+            <label for="eportal">Portal tag</label>
+            <input id="eportal" name="portal_tag" value="{{.Form.PortalTag}}">
+          </div>
+          <div class="field">
+            <label for="enotes">Notes</label>
+            <input id="enotes" name="notes" value="{{.Form.Notes}}">
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:12px">
+          <span class="field check"><input type="checkbox" name="use_tls" value="1"{{if .Form.UseTLS}} checked{{end}}><span>API-SSL</span></span>
+          <span class="field check"><input type="checkbox" name="verify_tls" value="1"{{if .Form.VerifyTLS}} checked{{end}}><span>Verify certificate</span></span>
+          <span class="field check"><input type="checkbox" name="default_portal" value="1"{{if .Form.DefaultPortal}} checked{{end}}><span>Default portal</span></span>
+          <button class="btn primary" type="submit">Save changes</button>
+        </div>
+      </form>
+
+      <details class="editor" style="margin-top:14px">
+        <summary>Remove this router</summary>
+        <p class="hint">Sessions and vouchers keep their history; hotspot users stay on the device.</p>
+        <form method="post" action="/routers/{{.Router.ID}}/delete">
+          {{template "csrf" .}}
+          <button class="btn danger" type="submit">Delete {{.Router.Name}}</button>
+        </form>
+      </details>
+    </div>
+  </section>
+</main>
+{{template "footer" .}}
+</body>
+</html>

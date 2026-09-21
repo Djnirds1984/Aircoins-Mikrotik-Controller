@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · {{.PortalName}}</title>
+{{template "styles" .}}
+</head>
+<body>
+{{template "nav" .}}
+<main class="wrap">
+  {{template "flash" .}}
+
+  <div class="page-head">
+    <div>
+      <h1>Router inventory</h1>
+      <p class="sub">{{humanCount .Stats.RoutersTotal}} device(s) registered · {{.Stats.RoutersOnline}} online ·
+        {{.Stats.SessionsOpen}} client(s) connected</p>
+    </div>
+    <div class="actions">
+      <a class="btn" href="/">Dashboard</a>
+      <a class="btn" href="/vouchers">Vouchers</a>
+    </div>
+  </div>
+
+  <section class="grid cols-2">
+    <div class="card">
+      <h2>Register a router</h2>
+      <p class="hint">Store the RouterOS API credentials once; the controller reconnects on its own from then on.</p>
+      <form method="post" action="/routers">
+        {{template "csrf" .}}
+        <div class="form-grid">
+          <div class="field">
+            <label for="name">Name</label>
+            <input id="name" name="name" value="{{.Form.Name}}" placeholder="Ground floor cafe" required>
+            {{with .Form.Errors.name}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="host">IP address / hostname</label>
+            <input id="host" name="host" value="{{.Form.Host}}" placeholder="192.168.88.1" required>
+            {{with .Form.Errors.host}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="port">API port</label>
+            <input id="port" name="port" value="{{.Form.Port}}" inputmode="numeric" required>
+            {{with .Form.Errors.port}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="username">API user</label>
+            <input id="username" name="username" value="{{.Form.Username}}" placeholder="aircoins" required>
+            {{with .Form.Errors.username}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="password">API password</label>
+            <input id="password" name="password" type="password" autocomplete="new-password" required>
+            {{with .Form.Errors.password}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="location">Location (optional)</label>
+            <input id="location" name="location" value="{{.Form.Location}}" placeholder="Level 2, east wing">
+          </div>
+          <div class="field">
+            <label for="portal_tag">Portal tag (optional)</label>
+            <input id="portal_tag" name="portal_tag" value="{{.Form.PortalTag}}" placeholder="hq">
+            {{with .Form.Errors.portal_tag}}<span class="error">{{.}}</span>{{end}}
+            <span class="muted" style="font-size:.78rem">Matches the hotspot server name so captive logins find this device.</span>
+          </div>
+          <div class="field">
+            <label for="notes">Notes (optional)</label>
+            <input id="notes" name="notes" value="{{.Form.Notes}}" placeholder="Installed 2026-09-21">
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:12px">
+          <span class="field check"><input id="use_tls" type="checkbox" name="use_tls" value="1"{{if .Form.UseTLS}} checked{{end}}>
+            <label for="use_tls">Use API-SSL (8729)</label></span>
+          <span class="field check"><input id="verify_tls" type="checkbox" name="verify_tls" value="1"{{if .Form.VerifyTLS}} checked{{end}}>
+            <label for="verify_tls">Verify certificate</label></span>
+          <span class="field check"><input id="default_portal" type="checkbox" name="default_portal" value="1"{{if .Form.DefaultPortal}} checked{{end}}>
+            <label for="default_portal">Default portal device</label></span>
+        </div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn primary" type="submit">Save and test connection</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Inventory</h2>
+      <p class="hint">Open a device to manage its live clients, IP bindings and vouchers.</p>
+      {{if .Routers}}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Name</th><th>Endpoint</th><th>Status</th><th class="num">Clients</th><th class="num">Vouchers</th><th></th></tr>
+          </thead>
+          <tbody>
+          {{range .Routers}}
+            <tr>
+              <td>
+                <a href="/routers/{{.Router.ID}}">{{.Router.Name}}</a>
+                {{if .Router.DefaultPortal}}<span class="badge blue">default portal</span>{{end}}
+                {{if .Router.PortalTag}}<div class="muted" style="font-size:.78rem">tag: {{.Router.PortalTag}}</div>{{end}}
+              </td>
+              <td class="mono">{{.Router.Endpoint}}
+                <div class="muted" style="font-size:.78rem">{{.Router.Username}} · {{if .Router.UseTLS}}api-ssl{{else}}api{{end}}</div>
+              </td>
+              <td><span class="{{statusClass .Router.LastStatus}}">{{.Router.LastStatus}}</span>
+                {{if .Router.LastLatencyMS}}<div class="muted" style="font-size:.78rem">{{.Router.LastLatencyMS}} ms</div>{{end}}
+              </td>
+              <td class="num">{{humanCount .OpenSessions}}</td>
+              <td class="num">{{humanCount .Vouchers}}</td>
+              <td class="num nowrap">
+                <a class="btn small" href="/routers/{{.Router.ID}}">Manage</a>
+                <details style="display:inline-block">
+                  <summary class="btn small danger">Delete</summary>
+                  <form method="post" action="/routers/{{.Router.ID}}/delete" style="margin-top:8px; text-align:right">
+                    {{template "csrf" $}}
+                    <button class="btn small danger" type="submit">Confirm</button>
+                  </form>
+                </details>
+              </td>
+            </tr>
+          {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+        <div class="empty">No devices yet. Register your first MikroTik router on the left.</div>
+      {{end}}
+    </div>
+  </section>
+</main>
+{{template "footer" .}}
+</body>
+</html>

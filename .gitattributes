@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# Shell installer must keep LF endings even on Windows checkouts.
+/install.sh text eol=lf
+

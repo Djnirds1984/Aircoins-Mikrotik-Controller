@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · {{.PortalName}}</title>
+{{template "styles" .}}
+</head>
+<body class="portal">
+<main class="portal-wrap">
+  <div class="portal-card">
+    <div class="brand"><span class="mark">A</span><span>{{.PortalName}}</span></div>
+    <h1>{{if .Success}}You are online{{else}}Hotspot sign in{{end}}</h1>
+    {{if .RouterKnown}}
+      <p class="sub">Connected via <strong>{{.RouterName}}</strong></p>
+    {{else}}
+      <p class="sub">Prepaid hotspot access</p>
+    {{end}}
+
+    {{if .Success}}
+      <div class="alert ok"><strong>Welcome online.</strong> Your session is active.</div>
+      {{if .Voucher}}
+        <dl class="kv">
+          <dt>Voucher</dt><dd class="mono">{{.Voucher.Code}}</dd>
+          <dt>Allowance</dt><dd>{{.Voucher.LimitSummary}}</dd>
+          {{if .Voucher.ExpiresAt}}<dt>Valid until</dt><dd>{{timeLabel .Voucher.ExpiresAt}}</dd>{{end}}
+        </dl>
+      {{end}}
+      {{if .Notice}}<p class="hint">{{.Notice}}</p>{{end}}
+      {{if .RedirectTo}}
+        <p><a class="btn primary" href="{{.RedirectTo}}">Continue browsing</a></p>
+      {{else if .FallbackLink}}
+        <p><a class="btn primary" href="{{.FallbackLink}}">Continue browsing</a></p>
+      {{else}}
+        <p class="hint">You can now open any website; this tab can be closed.</p>
+      {{end}}
+    {{else}}
+      {{if .FormError}}<div class="alert err">{{.FormError}}</div>{{end}}
+      {{if .Notice}}<div class="alert warn">{{.Notice}}</div>{{end}}
+
+      <form method="post" action="/portal/login?{{portalQuery .Portal}}">
+        <div class="field">
+          <label for="voucher">Voucher code</label>
+          <input id="voucher" name="voucher" autocomplete="off" placeholder="AIR-XXXX-XXXX"
+            value="{{.Portal.Username}}">
+          <span class="muted" style="font-size:.78rem">Printed on your receipt or card.</span>
+        </div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn primary" type="submit">Connect with voucher</button>
+        </div>
+      </form>
+
+      <details class="editor" style="margin-top:14px">
+        <summary>Staff or username login</summary>
+        <form method="post" action="/portal/login?{{portalQuery .Portal}}" style="margin-top:10px">
+          <div class="form-grid">
+            <div class="field">
+              <label for="username">Username</label>
+              <input id="username" name="username" autocomplete="username">
+            </div>
+            <div class="field">
+              <label for="password">Password</label>
+              <input id="password" name="password" type="password" autocomplete="current-password">
+            </div>
+          </div>
+          <div class="btn-row" style="margin-top:12px">
+            <button class="btn" type="submit">Sign in</button>
+          </div>
+        </form>
+      </details>
+
+      <p class="hint" style="margin-top:14px">
+        {{if .Portal.MAC}}Device <span class="mono">{{.Portal.MAC}}</span>{{end}}
+        {{if .Portal.IP}} · <span class="mono">{{.Portal.IP}}</span>{{end}}
+      </p>
+    {{end}}
+  </div>
+  <p class="portal-foot">{{.PortalName}} · ask the front desk if a code does not work</p>
+</main>
+</body>
+</html>

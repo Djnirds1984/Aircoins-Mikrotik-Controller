@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · {{.PortalName}}</title>
+{{template "styles" .}}
+</head>
+<body>
+{{template "nav" .}}
+<main class="wrap">
+  {{template "flash" .}}
+
+  <div class="page-head">
+    <div>
+      <h1>Fleet overview</h1>
+      <p class="sub">Registered MikroTik hotspots, live clients and the prepaid voucher ledger.</p>
+    </div>
+    <div class="actions">
+      <a class="btn" href="/sessions?status=open">Live sessions</a>
+      <a class="btn primary" href="/routers">Manage routers</a>
+    </div>
+  </div>
+
+  <section class="grid cols-4">
+    <div class="card stat">
+      <span class="label">Routers</span>
+      <span class="value">{{humanCount .Stats.RoutersTotal}}</span>
+      <span class="meta">{{.Stats.RoutersOnline}} online · {{.Stats.RoutersOffline}} offline · {{.Stats.RoutersUnknown}} unknown</span>
+    </div>
+    <div class="card stat">
+      <span class="label">Active clients</span>
+      <span class="value">{{humanCount .Stats.SessionsOpen}}</span>
+      <span class="meta">tracked across all routers</span>
+    </div>
+    <div class="card stat">
+      <span class="label">Vouchers</span>
+      <span class="value">{{humanCount .Stats.Vouchers.Total}}</span>
+      <span class="meta">{{.Stats.Vouchers.Unused}} unused · {{.Stats.Vouchers.Active}} active · {{.Stats.Vouchers.Used}} used</span>
+    </div>
+    <div class="card stat">
+      <span class="label">Redeemed value</span>
+      <span class="value">{{money .Stats.Vouchers.BilledCents}}</span>
+      <span class="meta">of {{money .Stats.Vouchers.FaceValueCents}} issued · {{.Stats.Vouchers.Pushed}} provisioned on devices</span>
+    </div>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <h2>Routers</h2>
+    <p class="hint">The status column reflects the last API connection attempt.</p>
+    {{if .Routers}}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th><th>API endpoint</th><th>Status</th><th class="num">Clients</th>
+            <th class="num">Vouchers</th><th>Last seen</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+        {{range .Routers}}
+          <tr>
+            <td><a href="/routers/{{.Router.ID}}">{{.Router.Name}}</a>
+              {{if .Router.Location}}<div class="muted" style="font-size:.8rem">{{.Router.Location}}</div>{{end}}
+            </td>
+            <td class="mono">{{.Router.Endpoint}}{{if .Router.UseTLS}} · api-ssl{{end}}</td>
+            <td><span class="{{statusClass .Router.LastStatus}}">{{.Router.LastStatus}}</span>
+              {{if .Router.LastError}}<div class="muted" style="font-size:.78rem">{{.Router.LastError}}</div>{{end}}
+            </td>
+            <td class="num">{{humanCount .OpenSessions}}</td>
+            <td class="num">{{humanCount .Vouchers}}</td>
+            <td class="nowrap">{{sinceLabel .Router.LastSeenAt}}</td>
+            <td class="num"><a class="btn small" href="/routers/{{.Router.ID}}">Open</a></td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+      <div class="empty">No routers registered yet. <a href="/routers">Add your first MikroTik device</a>.</div>
+    {{end}}
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <h2>Live clients</h2>
+    {{if .Sessions}}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>User</th><th>Router</th><th>Address</th><th class="num">Traffic</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+        {{range .Sessions}}
+          <tr>
+            <td class="mono"><strong>{{if .Username}}{{.Username}}{{else}}—{{end}}</strong></td>
+            <td>{{if .RouterName}}{{.RouterName}}{{else}}<span class="muted">router {{.RouterID}}</span>{{end}}</td>
+            <td class="mono">{{.Address}}</td>
+            <td class="num">{{humanBytes .TotalBytes}}</td>
+            <td>{{if .Open}}<span class="badge green">open</span>{{else}}<span class="badge slate">closed</span>{{end}}</td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+      <div class="empty">No active hotspot clients tracked right now.</div>
+    {{end}}
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <h2>Recent vouchers</h2>
+    {{if .Vouchers}}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Code</th><th>Allowance</th><th>Router</th><th>Status</th><th class="num">Uses</th><th>Expires</th><th class="num">Actions</th></tr>
+        </thead>
+        <tbody>
+          {{template "voucherRows" .}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+      <div class="empty">No vouchers generated yet. <a href="/vouchers">Create the first batch</a>.</div>
+    {{end}}
+  </section>
+</main>
+{{template "footer" .}}
+</body>
+</html>

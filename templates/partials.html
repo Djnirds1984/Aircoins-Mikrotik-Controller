@@ -1,0 +1,205 @@
+{{define "styles"}}<style>
+:root{
+  --bg:#0b1120; --panel:#111c33; --panel-2:#16223c; --line:#22304d; --text:#e6ecf7;
+  --muted:#8fa3c4; --accent:#38bdf8; --accent-2:#22d3ee; --radius:14px;
+  --shadow:0 10px 30px rgba(2,6,23,.45);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background-color:var(--bg);
+  background-image:radial-gradient(900px 420px at 12% -12%,rgba(56,189,248,.14),transparent 65%);
+  color:var(--text);
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;
+  min-height:100vh; display:flex; flex-direction:column;
+}
+a{color:var(--accent); text-decoration:none}
+a:hover{text-decoration:underline}
+h1,h2,h3{margin:0 0 .35em; line-height:1.25}
+h1{font-size:1.45rem}
+h2{font-size:1.1rem}
+h3{font-size:.98rem}
+p{margin:.25em 0 .8em}
+code,kbd,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.86em}
+.topbar{
+  display:flex; align-items:center; gap:18px; padding:14px 22px;
+  background:rgba(12,19,35,.92); border-bottom:1px solid var(--line);
+  position:sticky; top:0; z-index:20; flex-wrap:wrap;
+}
+.brand{display:flex; align-items:center; gap:10px; font-weight:650; letter-spacing:.2px}
+.brand .mark{
+  width:30px; height:30px; border-radius:9px; display:grid; place-items:center;
+  background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#04121f; font-weight:800;
+}
+.nav{display:flex; gap:6px; flex-wrap:wrap; margin-left:auto}
+.nav a{padding:7px 13px; border-radius:999px; color:var(--muted); border:1px solid transparent; font-weight:550}
+.nav a:hover{color:var(--text); background:var(--panel-2); text-decoration:none}
+.nav a.active{color:#04121f; background:linear-gradient(135deg,var(--accent),var(--accent-2))}
+.wrap{width:100%; max-width:1220px; margin:0 auto; padding:24px 22px 48px; flex:1}
+.page-head{display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin-bottom:18px}
+.page-head .sub{color:var(--muted); margin:0}
+.page-head .actions{margin-left:auto; display:flex; gap:8px; flex-wrap:wrap}
+.grid{display:grid; gap:16px}
+.grid.cols-4{grid-template-columns:repeat(auto-fit,minmax(215px,1fr))}
+.grid.cols-3{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.grid.cols-2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.card{
+  background:linear-gradient(180deg,var(--panel),var(--panel-2));
+  border:1px solid var(--line); border-radius:var(--radius); padding:18px; box-shadow:var(--shadow);
+}
+.card h2{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+.card .hint{color:var(--muted); font-size:.85rem; margin:0 0 12px}
+.stat{display:flex; flex-direction:column; gap:6px}
+.stat .label{color:var(--muted); font-size:.78rem; text-transform:uppercase; letter-spacing:.08em}
+.stat .value{font-size:1.85rem; font-weight:700; line-height:1.1}
+.stat .meta{color:var(--muted); font-size:.82rem}
+table{width:100%; border-collapse:collapse; font-size:.9rem}
+th,td{text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:middle}
+th{color:var(--muted); font-size:.76rem; text-transform:uppercase; letter-spacing:.07em; font-weight:600}
+tbody tr:hover{background:rgba(56,189,248,.06)}
+td.num,th.num{text-align:right}
+.table-wrap{overflow-x:auto; margin:0 -4px}
+.empty{color:var(--muted); text-align:center; padding:26px 10px; border:1px dashed var(--line); border-radius:12px}
+.badge{
+  display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:999px;
+  font-size:.74rem; font-weight:650; border:1px solid transparent; white-space:nowrap;
+}
+.badge.green{background:rgba(52,211,153,.14); color:#6ee7b7; border-color:rgba(52,211,153,.35)}
+.badge.red{background:rgba(248,113,113,.14); color:#fca5a5; border-color:rgba(248,113,113,.35)}
+.badge.amber{background:rgba(251,191,36,.14); color:#fcd34d; border-color:rgba(251,191,36,.35)}
+.badge.blue{background:rgba(56,189,248,.14); color:#7dd3fc; border-color:rgba(56,189,248,.35)}
+.badge.slate{background:rgba(148,163,184,.14); color:#cbd5e1; border-color:rgba(148,163,184,.35)}
+.btn{
+  display:inline-flex; align-items:center; gap:6px; padding:8px 14px; border-radius:10px;
+  border:1px solid var(--line); background:var(--panel-2); color:var(--text); font:inherit;
+  font-weight:600; cursor:pointer; text-decoration:none;
+}
+.btn:hover{border-color:var(--accent); text-decoration:none}
+.btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#04121f; border-color:transparent}
+.btn.danger{color:#fca5a5; border-color:rgba(248,113,113,.4)}
+.btn.small{padding:5px 10px; font-size:.82rem; border-radius:8px}
+.btn-row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+.form-grid{display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+.field{display:flex; flex-direction:column; gap:5px}
+.field label{font-size:.8rem; color:var(--muted); font-weight:600}
+.field input,.field select,.field textarea{
+  background:#0a1223; border:1px solid var(--line); color:var(--text); border-radius:10px;
+  padding:9px 11px; font:inherit; width:100%;
+}
+.field input:focus,.field select:focus,.field textarea:focus{
+  outline:2px solid rgba(56,189,248,.45); border-color:var(--accent)
+}
+.field .error{color:#fca5a5; font-size:.8rem}
+.field.check{flex-direction:row; align-items:center; gap:8px}
+.field.check input{width:auto}
+.field.check label{color:var(--text)}
+.alert{padding:11px 14px; border-radius:12px; margin:0 0 16px; border:1px solid; font-size:.9rem}
+.alert.ok{background:rgba(52,211,153,.1); border-color:rgba(52,211,153,.4); color:#a7f3d0}
+.alert.warn{background:rgba(251,191,36,.1); border-color:rgba(251,191,36,.4); color:#fde68a}
+.alert.err{background:rgba(248,113,113,.1); border-color:rgba(248,113,113,.4); color:#fecaca}
+.kv{display:grid; grid-template-columns:auto 1fr; gap:6px 14px; font-size:.88rem; margin:0}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0}
+.notice-list{margin:0; padding-left:18px; color:#fde68a; font-size:.86rem}
+footer{border-top:1px solid var(--line); color:var(--muted); font-size:.8rem; padding:14px 22px; display:flex; gap:12px; flex-wrap:wrap}
+footer .spacer{margin-left:auto}
+details.editor{border:1px solid var(--line); border-radius:12px; padding:12px 14px; background:rgba(9,15,29,.5)}
+details.editor summary{cursor:pointer; font-weight:650}
+details.editor[open] summary{margin-bottom:12px}
+.pill-row{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px}
+.pill-row a{padding:5px 11px; border-radius:999px; border:1px solid var(--line); color:var(--muted); font-size:.82rem}
+.pill-row a.active{background:var(--panel-2); color:var(--text); border-color:var(--accent)}
+.inline-form{display:inline}
+.muted{color:var(--muted)}
+.nowrap{white-space:nowrap}
+.split{display:flex; gap:16px; flex-wrap:wrap; align-items:center}
+.portal{min-height:100vh; align-items:center; justify-content:center}
+.portal-wrap{width:100%; max-width:440px; margin:0 auto; padding:32px 18px 24px; flex:1; display:flex; flex-direction:column; gap:12px}
+.portal-card{background:linear-gradient(180deg,var(--panel),var(--panel-2)); border:1px solid var(--line); border-radius:18px; padding:26px 24px; box-shadow:var(--shadow)}
+.portal-card h1{font-size:1.5rem; margin:.4em 0 .15em}
+.portal-card .sub{color:var(--muted); margin:0 0 14px}
+.portal-card .brand{margin-bottom:6px}
+.portal-foot{text-align:center; color:var(--muted); font-size:.8rem}
+@media (max-width:620px){
+  .wrap{padding:18px 14px 40px}
+  .nav{margin-left:0}
+  h1{font-size:1.25rem}
+}
+</style>{{end}}
+
+{{define "flash"}}{{with .Flash}}<div class="{{.Class}}" role="status">{{.Message}}</div>{{end}}{{end}}
+
+{{define "csrf"}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
+
+{{define "nav"}}
+<header class="topbar">
+  <div class="brand"><span class="mark">A</span><span>{{.PortalName}}</span></div>
+  <nav class="nav">
+    <a href="/"{{if eq .Nav "dashboard"}} class="active"{{end}}>Dashboard</a>
+    <a href="/routers"{{if eq .Nav "routers"}} class="active"{{end}}>Routers</a>
+    <a href="/vouchers"{{if eq .Nav "vouchers"}} class="active"{{end}}>Vouchers</a>
+    <a href="/sessions"{{if eq .Nav "sessions"}} class="active"{{end}}>Sessions</a>
+  </nav>
+</header>
+{{end}}
+
+{{define "voucherRows"}}
+{{range .Vouchers}}
+  <tr>
+    <td class="mono"><strong>{{.Code}}</strong>
+      {{if .Batch}}<div class="muted" style="font-size:.76rem">{{.Batch}}</div>{{end}}
+      {{if .Note}}<div class="muted" style="font-size:.76rem">{{.Note}}</div>{{end}}
+    </td>
+    <td>{{.LimitSummary}}
+      {{if .PriceCents}}<div class="muted" style="font-size:.76rem">{{money .PriceCents}}</div>{{end}}
+    </td>
+    <td>{{if .RouterName}}{{.RouterName}}{{else}}<span class="muted">unbound</span>{{end}}</td>
+    <td>
+      <span class="{{.Status.Class}}">{{.Status.Label}}</span>
+      {{if .PushedAt}}<span class="badge blue">on device</span>{{end}}
+      {{if .DeviceLimit}}<div class="muted" style="font-size:.74rem">{{.DeviceLimit}} device(s)</div>{{end}}
+    </td>
+    <td class="num">{{.Uses}}/{{.MaxUses}}</td>
+    <td class="nowrap">{{timeLabel .ExpiresAt}}</td>
+    <td class="num nowrap">
+      <form class="inline-form" method="post" action="/vouchers/{{.ID}}/push">
+        {{template "csrf" $}}
+        <input type="hidden" name="back" value="{{$.Back}}">
+        <button class="btn small" type="submit">Provision</button>
+      </form>
+      <form class="inline-form" method="post" action="/vouchers/{{.ID}}/validate">
+        {{template "csrf" $}}
+        <input type="hidden" name="back" value="{{$.Back}}">
+        <button class="btn small" type="submit">Verify</button>
+      </form>
+      {{if eq .Status "disabled"}}
+      <form class="inline-form" method="post" action="/vouchers/{{.ID}}/status">
+        {{template "csrf" $}}
+        <input type="hidden" name="back" value="{{$.Back}}">
+        <input type="hidden" name="status" value="unused">
+        <button class="btn small" type="submit">Enable</button>
+      </form>
+      {{else}}
+      <form class="inline-form" method="post" action="/vouchers/{{.ID}}/status">
+        {{template "csrf" $}}
+        <input type="hidden" name="back" value="{{$.Back}}">
+        <input type="hidden" name="status" value="disabled">
+        <button class="btn small danger" type="submit">Disable</button>
+      </form>
+      {{end}}
+      <form class="inline-form" method="post" action="/vouchers/{{.ID}}/delete">
+        {{template "csrf" $}}
+        <input type="hidden" name="back" value="{{$.Back}}">
+        <button class="btn small danger" type="submit">Delete</button>
+      </form>
+    </td>
+  </tr>
+{{end}}
+{{end}}
+
+{{define "footer"}}
+<footer>
+  <span>{{.PortalName}} · MikroTik hotspot controller</span>
+  <span class="spacer">v{{.Version}} · {{.Year}}</span>
+</footer>
+{{end}}

@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · {{.PortalName}}</title>
+{{template "styles" .}}
+</head>
+<body>
+{{template "nav" .}}
+<main class="wrap">
+  {{template "flash" .}}
+
+  <div class="page-head">
+    <div>
+      <h1>Prepaid vouchers</h1>
+      <p class="sub">{{humanCount .Stats.Total}} key(s) issued · {{.Stats.Unused}} unused · {{.Stats.Active}} active ·
+        {{.Stats.Used}} used · {{.Stats.Pushed}} provisioned on devices · redeemed value {{money .Stats.BilledCents}}</p>
+    </div>
+    <div class="actions">
+      <a class="btn" href="/vouchers/export.csv?status={{.Filter.Status}}&amp;batch={{.Filter.Batch}}&amp;q={{.Filter.Query}}&amp;router={{if .Filter.RouterID}}{{.Filter.RouterID}}{{end}}">Export CSV</a>
+      <a class="btn" href="/routers">Routers</a>
+    </div>
+  </div>
+
+  <section class="card">
+    <h2>Generate a batch</h2>
+    <p class="hint">Codes are random and human friendly. Time and data limits are pushed to the router as
+      <span class="mono">limit-uptime</span> and <span class="mono">limit-bytes-total</span>; 0 means unlimited.</p>
+    <form method="post" action="/vouchers/generate">
+      {{template "csrf" .}}
+      <div class="form-grid">
+        <div class="field">
+          <label for="router_id">Bind to router</label>
+          <select id="router_id" name="router_id">
+            <option value="">Any router (portal decides)</option>
+            {{range .Routers}}
+            <option value="{{.ID}}"{{if eq $.Form.RouterID (printf "%d" .ID)}} selected{{end}}>{{.Name}} — {{.Endpoint}}</option>
+            {{end}}
+          </select>
+        </div>
+        <div class="field">
+          <label for="quantity">How many keys</label>
+          <input id="quantity" name="quantity" value="{{.Form.Quantity}}" inputmode="numeric">
+          {{with .Form.Errors.quantity}}<span class="error">{{.}}</span>{{end}}
+        </div>
+        <div class="field">
+          <label for="batch">Batch name</label>
+          <input id="batch" name="batch" value="{{.Form.Batch}}">
+        </div>
+        <div class="field">
+          <label for="profile">Hotspot profile</label>
+          <input id="profile" name="profile" value="{{.Form.Profile}}" placeholder="default">
+        </div>
+        <div class="field">
+          <label for="duration_minutes">Time limit (minutes)</label>
+          <input id="duration_minutes" name="duration_minutes" value="{{.Form.Duration}}" inputmode="numeric">
+          {{with .Form.Errors.duration_minutes}}<span class="error">{{.}}</span>{{end}}
+        </div>
+        <div class="field">
+          <label for="data_limit_mb">Data limit (MB)</label>
+          <input id="data_limit_mb" name="data_limit_mb" value="{{.Form.DataLimit}}" inputmode="numeric">
+          {{with .Form.Errors.data_limit_mb}}<span class="error">{{.}}</span>{{end}}
+        </div>
+        <div class="field">
+          <label for="device_limit">Devices per key</label>
+          <input id="device_limit" name="device_limit" value="{{.Form.DeviceLimit}}" inputmode="numeric">
+          {{with .Form.Errors.device_limit}}<span class="error">{{.}}</span>{{end}}
+        </div>
+        <div class="field">
+          <label for="max_uses">Logins allowed</label>
+          <input id="max_uses" name="max_uses" value="{{.Form.MaxUses}}" inputmode="numeric">
+          {{with .Form.Errors.max_uses}}<span class="error">{{.}}</span>{{end}}
+        </div>
+        <div class="field">
+          <label for="price">Price</label>
+          <input id="price" name="price" value="{{.Form.Price}}" inputmode="decimal">
+          {{with .Form.Errors.price}}<span class="error">{{.}}</span>{{end}}
+        </div>
+        <div class="field">
+          <label for="prefix">Code prefix</label>
+          <input id="prefix" name="prefix" value="{{.Form.Prefix}}">
+        </div>
+        <div class="field">
+          <label for="groups">Random groups</label>
+          <input id="groups" name="groups" value="{{.Form.Groups}}" inputmode="numeric">
+          {{with .Form.Errors.groups}}<span class="error">{{.}}</span>{{end}}
+        </div>
+        <div class="field">
+          <label for="group_length">Characters per group</label>
+          <input id="group_length" name="group_length" value="{{.Form.GroupLength}}" inputmode="numeric">
+          {{with .Form.Errors.group_length}}<span class="error">{{.}}</span>{{end}}
+        </div>
+        <div class="field">
+          <label for="note">Note (optional)</label>
+          <input id="note" name="note" value="{{.Form.Note}}" placeholder="Reception desk sales">
+        </div>
+      </div>
+      <div class="btn-row" style="margin-top:12px">
+        <label class="field check">
+          <input type="checkbox" name="push" value="1"{{if .Form.Push}} checked{{end}}>
+          <span>Provision on the router right away (keys then work even if this controller is offline)</span>
+        </label>
+        <button class="btn primary" type="submit">Generate vouchers</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <h2>Search and filter</h2>
+    <form method="get" action="/vouchers">
+      <div class="form-grid">
+        <div class="field">
+          <label for="status">Status</label>
+          <select id="status" name="status">
+            <option value="">All statuses</option>
+            <option value="unused"{{if eq $.Filter.Status "unused"}} selected{{end}}>Unused</option>
+            <option value="active"{{if eq $.Filter.Status "active"}} selected{{end}}>Active</option>
+            <option value="used"{{if eq $.Filter.Status "used"}} selected{{end}}>Used</option>
+            <option value="expired"{{if eq $.Filter.Status "expired"}} selected{{end}}>Expired</option>
+            <option value="disabled"{{if eq $.Filter.Status "disabled"}} selected{{end}}>Disabled</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="router">Router</label>
+          <select id="router" name="router">
+            <option value="">All routers</option>
+            {{range .Routers}}
+            <option value="{{.ID}}"{{if eq $.Filter.RouterID .ID}} selected{{end}}>{{.Name}}</option>
+            {{end}}
+          </select>
+        </div>
+        <div class="field">
+          <label for="batch">Batch</label>
+          <select id="batch" name="batch">
+            <option value="">All batches</option>
+            {{range .Batches}}
+            <option value="{{.}}"{{if eq $.Filter.Batch .}} selected{{end}}>{{.}}</option>
+            {{end}}
+          </select>
+        </div>
+        <div class="field">
+          <label for="q">Code, batch or note</label>
+          <input id="q" name="q" value="{{.Filter.Query}}" placeholder="AIR-XXXX, BATCH-..., reception">
+        </div>
+      </div>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn primary" type="submit">Apply filters</button>
+        <a class="btn" href="/vouchers">Clear</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <h2>Vouchers</h2>
+    <p class="hint">{{humanCount .Total}} key(s) · page {{.PageNo}} of {{.Pages}}</p>
+    {{if .Vouchers}}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Code</th><th>Allowance</th><th>Router</th><th>Status</th><th class="num">Uses</th><th>Expires</th><th class="num">Actions</th></tr>
+        </thead>
+        <tbody>
+          {{template "voucherRows" .}}
+        </tbody>
+      </table>
+    </div>
+    <div class="btn-row" style="margin-top:12px">
+      {{if gt .PageNo 1}}<a class="btn" href="{{.PrevURL}}">Previous</a>{{end}}
+      {{if lt .PageNo .Pages}}<a class="btn" href="{{.NextURL}}">Next</a>{{end}}
+    </div>
+    {{else}}
+      <div class="empty">No vouchers match these filters. Generate the first batch above.</div>
+    {{end}}
+  </section>
+
+  {{if .Batches}}
+  <section class="card" style="margin-top:16px">
+    <h2>Batches</h2>
+    <p class="hint">Delete a whole print run at once. Redeemed keys are kept unless you tick the box.</p>
+    {{range .Batches}}
+    <form class="inline-form" method="post" action="/vouchers/batch/delete" style="margin:0 12px 8px 0">
+      {{template "csrf" $}}
+      <input type="hidden" name="batch" value="{{.}}">
+      <input type="hidden" name="back" value="{{$.Back}}">
+      <span class="mono">{{.}}</span>
+      <label class="field check" style="margin-left:8px"><input type="checkbox" name="only_unused" value="1" checked><span>unused only</span></label>
+      <button class="btn small danger" type="submit">Delete</button>
+    </form>
+    {{end}}
+  </section>
+  {{end}}
+</main>
+{{template "footer" .}}
+</body>
+</html>

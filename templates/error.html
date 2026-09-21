@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · {{.PortalName}}</title>
+{{template "styles" .}}
+</head>
+<body>
+{{template "nav" .}}
+<main class="wrap">
+  <div class="page-head">
+    <div>
+      <h1>Something went wrong</h1>
+      <p class="sub">{{.Message}}</p>
+    </div>
+    <div class="actions">
+      <a class="btn primary" href="/">Back to dashboard</a>
+    </div>
+  </div>
+
+  <section class="card">
+    <h2>{{.Title}}</h2>
+    <p class="hint">The controller could not complete this page. The details below help the operator diagnose it.</p>
+    {{if .Detail}}<p class="mono" style="word-break:break-word">{{.Detail}}</p>{{end}}
+    <div class="btn-row">
+      <a class="btn" href="/">Dashboard</a>
+      <a class="btn" href="/routers">Routers</a>
+      <a class="btn" href="/vouchers">Vouchers</a>
+      <a class="btn" href="/sessions">Sessions</a>
+    </div>
+  </section>
+</main>
+{{template "footer" .}}
+</body>
+</html>
