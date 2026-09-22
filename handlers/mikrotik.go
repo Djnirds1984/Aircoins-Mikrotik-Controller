@@ -490,6 +490,115 @@ func (c *MikrotikClient) DeviceInfo(ctx context.Context) (DeviceInfo, error) {
 	return info, nil
 }
 
+// InterfaceStats is one entry of /interface/print with statistics.
+type InterfaceStats struct {
+	ID         string
+	Name       string
+	Type       string
+	CPULoad    int
+	MTU        int64
+	MACAddress string
+	RxBytes    int64
+	TxBytes    int64
+	RxPackets  int64
+	TxPackets  int64
+	RxRate     int64
+	TxRate     int64
+}
+
+// InterfaceList lists the interfaces of a device with traffic statistics.
+func (c *MikrotikClient) InterfaceList(ctx context.Context) ([]InterfaceStats, error) {
+	reply, err := c.Run(ctx, "/interface/print", "=.proplist=.id,name,type,mtu,mac-address",
+		"=.sum rx-byte,tx-byte,rx-packet,tx-packet,rx-rate,tx-rate")
+	if err != nil {
+		return nil, err
+	}
+	interfaces := make([]InterfaceStats, 0, len(reply.Re))
+	for _, row := range reply.Re {
+		interfaces = append(interfaces, InterfaceStats{
+			ID:         row[".id"],
+			Name:       row["name"],
+			Type:       row["type"],
+			MTU:        parseInt64(row["mtu"]),
+			MACAddress: row["mac-address"],
+			RxBytes:    parseInt64(row["rx-byte"]),
+			TxBytes:    parseInt64(row["tx-byte"]),
+			RxPackets:  parseInt64(row["rx-packet"]),
+			TxPackets:  parseInt64(row["tx-packet"]),
+			RxRate:     parseInt64(row["rx-rate"]),
+			TxRate:     parseInt64(row["tx-rate"]),
+		})
+	}
+	return interfaces, nil
+}
+
+// MonitorInterface monitors a specific interface for traffic data.
+func (c *MikrotikClient) MonitorInterface(ctx context.Context, id string) (InterfaceStats, error) {
+	reply, err := c.Run(ctx, "/interface/print", "=.id="+id,
+		"=.proplist=.id,name,type,mtu,mac-address",
+		"=.sum rx-byte,tx-byte,rx-packet,tx-packet,rx-rate,tx-rate")
+	if err != nil {
+		return InterfaceStats{}, err
+	}
+	if len(reply.Re) == 0 {
+		return InterfaceStats{}, ErrRouterNotFound
+	}
+	row := reply.Re[0]
+	return InterfaceStats{
+		ID:         row[".id"],
+		Name:       row["name"],
+		Type:       row["type"],
+		MTU:        parseInt64(row["mtu"]),
+		MACAddress: row["mac-address"],
+		RxBytes:    parseInt64(row["rx-byte"]),
+		TxBytes:    parseInt64(row["tx-byte"]),
+		RxPackets:  parseInt64(row["rx-packet"]),
+		TxPackets:  parseInt64(row["tx-packet"]),
+		RxRate:     parseInt64(row["rx-rate"]),
+		TxRate:     parseInt64(row["tx-rate"]),
+	}, nil
+}
+
+// InterfaceTraffic is a single data point for the traffic graph.
+type InterfaceTraffic struct {
+	Timestamp time.Time
+	RxBytes   int64
+	TxBytes   int64
+	RxRate    int64
+	TxRate    int64
+}
+
+// InterfaceTrafficHistory holds a series of traffic data points for graphing.
+type InterfaceTrafficHistory struct {
+	InterfaceID   string
+	InterfaceName string
+	Points        []InterfaceTraffic
+}
+
+// MonitorInterfaceTraffic collects traffic data points for graphing.
+func (c *MikrotikClient) MonitorInterfaceTraffic(ctx context.Context, id string, points *InterfaceTrafficHistory) error {
+	stats, err := c.MonitorInterface(ctx, id)
+	if err != nil {
+		return err
+	}
+	points.InterfaceID = id
+	if points.InterfaceName == "" {
+		points.InterfaceName = stats.Name
+	}
+	points.Points = append(points.Points, InterfaceTraffic{
+		Timestamp: time.Now(),
+		RxBytes:   stats.RxBytes,
+		TxBytes:   stats.TxBytes,
+		RxRate:    stats.RxRate,
+		TxRate:    stats.TxRate,
+	})
+	// Keep only the last 60 points
+	if len(points.Points) > 60 {
+		points.Points = points.Points[len(points.Points)-60:]
+	}
+	return nil
+}
+
 // HotspotActive is one entry of /ip/hotspot/active/print.
 type HotspotActive struct {
 	ID         string

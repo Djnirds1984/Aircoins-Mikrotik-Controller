@@ -1,10 +1,11 @@
-// Package handlers contains the HTTP layer of the Aircoins MikroTik
-// controller: the admin dashboard, the router inventory CRUD, the live device
-// manager, the voucher engine, the captive portal, and the REST API.
+// REST API layer for the Aircoins MikroTik controller. Endpoints live under
+// /api/v1, speak JSON, and reuse the MikrotikClient from mikrotik.go so they
+// inherit the reconnecting RouterOS client and the classified RouterError
+// sentinels. Device queries use the same commands RouterOS v7 exposes.
 //
-// The REST API lives under /api/v1 and speaks JSON. It reuses the same
-// MikrotikClient from mikrotik.go, so every endpoint inherits the reconnecting
-// RouterOS API client and the classified RouterError sentinels.
+// The API is intended for machine clients (integrations, monitoring, kiosk
+// systems) and is therefore exempt from the browser CSRF guard; expose it
+// behind a reverse proxy with auth when running on an untrusted network.
 package handlers
 
 import (
@@ -19,12 +20,14 @@ import (
 	"github.com/djnirds1984/aircoins-mikrotik-controller/database"
 )
 
-// ---------------------------------------------------------------------------
-// JSON helpers
-// ---------------------------------------------------------------------------
+// apiError is the body of every non-2xx response.
+type apiError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
 
-// writeJSON writes a JSON response with the given status code.
-func (h *Handler) writeJSON(w http.ResponseWriter, status int, v any) {
+// writeAPIJSON writes any value as a JSON response.
+func (h *Handler) writeAPIJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
@@ -32,43 +35,141 @@ func (h *Handler) writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
-// writeJSONError writes a standardised JSON error body.
-func (h *Handler) writeJSONError(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	h.writeJSON(w, status, jsonError{Code: code, Message: message})
+// writeAPIError writes a standardised JSON error body.
+func (h *Handler) writeAPIError(w http.ResponseWriter, status int, code, message string) {
+	h.writeAPIJSON(w, status, apiError{Code: code, Message: message})
 }
 
-// jsonError is the body of every API error response.
-type jsonError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+// decodeAPIBody parses a JSON request body into dst.
+func decodeAPIBody(r *http.Request, dst any) bool {
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		return false
+	}
+	return true
 }
 
-// jsonRouter is the public shape of a router row.
-type jsonRouter struct {
-	ID            int64     `json:"id"`
-	Name          string    `json:"name"`
-	Host          string    `json:"host"`
-	Port          int       `json:"port"`
-	Username      string    `json:"username"`
-	UseTLS        bool      `json:"use_tls"`
-	VerifyTLS     bool      `json:"verify_tls"`
-	Location      string    `json:"location"`
-	PortalTag     string    `json:"portal_tag"`
-	DefaultPortal bool      `json:"default_portal"`
-	Notes         string    `json:"notes"`
-	LastStatus    string    `json:"last_status"`
-	LastError     string    `json:"last_error"`
-	LastLatencyMS int64     `json:"last_latency_ms"`
-	LastSeenAt    time.Time `json:"last_seen_at"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+// apiRouterLookupDB loads the router referenced by {id} without opening a
+// device connection. When ok is false a response has already been written.
+func (h *Handler) apiRouterLookupDB(w http.ResponseWriter, r *http.Request) (database.Router, bool) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		h.writeAPIError(w, http.StatusBadRequest, "invalid_id",
+			"router id must be a positive integer")
+		return database.Router{}, false
+	}
+	router, err := h.db.Routers().Get(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			h.writeAPIError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("router %d does not exist", id))
+			return database.Router{}, false
+		}
+		h.log.Error("api load router", "id", id, "error", err)
+		h.writeAPIError(w, http.StatusInternalServerError, "db_error",
+			"failed to load router")
+		return database.Router{}, false
+	}
+	return router, true
 }
 
-// toJSONRouter converts a database Router into the public JSON shape.
-func toJSONRouter(r database.Router) jsonRouter {
-	return jsonRouter{
+// apiRouterLookup loads the router referenced by {id} and opens an API
+// connection. When ok is false a response has already been written.
+func (h *Handler) apiRouterLookup(w http.ResponseWriter, r *http.Request) (database.Router, *MikrotikClient, bool) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		h.writeAPIError(w, http.StatusBadRequest, "invalid_id",
+			"router id must be a positive integer")
+		return database.Router{}, nil, false
+	}
+	router, err := h.db.Routers().Get(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			h.writeAPIError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("router %d does not exist", id))
+			return database.Router{}, nil, false
+		}
+		h.log.Error("api load router", "id", id, "error", err)
+		h.writeAPIError(w, http.StatusInternalServerError, "db_error",
+			"failed to load router")
+		return database.Router{}, nil, false
+	}
+	client, err := h.dialRouter(r.Context(), router)
+	if err != nil {
+		h.writeAPIError(w, http.StatusBadGateway, "router_unreachable",
+			routerErrorHint(err))
+		return router, nil, false
+	}
+	return router, client, true
+}
+
+// RoutesAPI wires every REST endpoint under /api/v1. It is called from
+// Routes() so the API shares the middleware chain of the web UI.
+func (h *Handler) RoutesAPI(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/v1/health", h.apiHealth)
+
+	mux.HandleFunc("GET /api/v1/routers", h.apiRoutersList)
+	mux.HandleFunc("POST /api/v1/routers", h.apiRouterCreate)
+	mux.HandleFunc("GET /api/v1/routers/{id}", h.apiRouterGet)
+	mux.HandleFunc("PUT /api/v1/routers/{id}", h.apiRouterUpdate)
+	mux.HandleFunc("DELETE /api/v1/routers/{id}", h.apiRouterDelete)
+	mux.HandleFunc("POST /api/v1/routers/{id}/test", h.apiRouterTest)
+	mux.HandleFunc("GET /api/v1/routers/{id}/device", h.apiRouterDevice)
+
+	mux.HandleFunc("GET /api/v1/routers/{id}/clients", h.apiRouterClients)
+	mux.HandleFunc("GET /api/v1/routers/{id}/bindings", h.apiRouterBindings)
+	mux.HandleFunc("GET /api/v1/routers/{id}/interfaces", h.apiRouterInterfaces)
+	mux.HandleFunc("GET /api/v1/routers/{id}/interfaces/{iface}/traffic", h.apiRouterInterfaceTraffic)
+
+	mux.HandleFunc("POST /api/v1/routers/{id}/clients/{cid}/disconnect", h.apiClientDisconnect)
+	mux.HandleFunc("POST /api/v1/routers/{id}/block", h.apiClientBlock)
+	mux.HandleFunc("POST /api/v1/routers/{id}/unblock", h.apiClientUnblock)
+	mux.HandleFunc("POST /api/v1/routers/{id}/command", h.apiRouterCommand)
+
+	mux.HandleFunc("GET /api/v1/vouchers", h.apiVouchersList)
+	mux.HandleFunc("POST /api/v1/vouchers", h.apiVoucherCreate)
+	mux.HandleFunc("GET /api/v1/vouchers/{code}", h.apiVoucherGet)
+	mux.HandleFunc("POST /api/v1/vouchers/{code}/redeem", h.apiVoucherRedeem)
+	mux.HandleFunc("DELETE /api/v1/vouchers/{id}", h.apiVoucherDelete)
+
+	mux.HandleFunc("POST /api/v1/portal/login", h.apiPortalLogin)
+}
+
+// apiHealth is the machine readable liveness probe.
+func (h *Handler) apiHealth(w http.ResponseWriter, r *http.Request) {
+	if err := h.db.Ping(r.Context()); err != nil {
+		h.writeAPIError(w, http.StatusServiceUnavailable, "unhealthy",
+			"database unreachable")
+		return
+	}
+	h.writeAPIJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// ---------------------------------------------------------------------------
+// JSON shapes
+// ---------------------------------------------------------------------------
+
+type apiRouter struct {
+	ID            int64      `json:"id"`
+	Name          string     `json:"name"`
+	Host          string     `json:"host"`
+	Port          int        `json:"port"`
+	Username      string     `json:"username"`
+	UseTLS        bool       `json:"use_tls"`
+	VerifyTLS     bool       `json:"verify_tls"`
+	Location      string     `json:"location"`
+	PortalTag     string     `json:"portal_tag"`
+	DefaultPortal bool       `json:"default_portal"`
+	Notes         string     `json:"notes"`
+	LastStatus    string     `json:"last_status"`
+	LastError     string     `json:"last_error"`
+	LastLatencyMS int64      `json:"last_latency_ms"`
+	LastSeenAt    *time.Time `json:"last_seen_at"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+}
+
+func toAPIRouter(r database.Router) apiRouter {
+	return apiRouter{
 		ID: r.ID, Name: r.Name, Host: r.Host, Port: r.Port,
 		Username: r.Username, UseTLS: r.UseTLS, VerifyTLS: r.VerifyTLS,
 		Location: r.Location, PortalTag: r.PortalTag,
@@ -79,14 +180,7 @@ func toJSONRouter(r database.Router) jsonRouter {
 	}
 }
 
-// jsonRouterList is the envelope for GET /api/v1/routers.
-type jsonRouterList struct {
-	Routers []jsonRouter `json:"routers"`
-	Total   int64        `json:"total"`
-}
-
-// jsonClient is the public shape of an active hotspot client.
-type jsonClient struct {
+type apiClient struct {
 	ID         string `json:"id"`
 	User       string `json:"user"`
 	Address    string `json:"address"`
@@ -97,19 +191,19 @@ type jsonClient struct {
 	Comment    string `json:"comment"`
 	BytesIn    int64  `json:"bytes_in"`
 	BytesOut   int64  `json:"bytes_out"`
+	TotalBytes int64  `json:"total_bytes"`
 }
 
-// toJSONClient converts a HotspotActive into the public JSON shape.
-func toJSONClient(c HotspotActive) jsonClient {
-	return jsonClient{
+func toAPIClient(c HotspotActive) apiClient {
+	return apiClient{
 		ID: c.ID, User: c.User, Address: c.Address, MACAddress: c.MACAddress,
 		Uptime: c.Uptime, LoginBy: c.LoginBy, Server: c.Server,
 		Comment: c.Comment, BytesIn: c.BytesIn, BytesOut: c.BytesOut,
+		TotalBytes: c.TotalBytes(),
 	}
 }
 
-// jsonDeviceInfo is the public shape of /system/identity + /system/resource.
-type jsonDeviceInfo struct {
+type apiDeviceInfo struct {
 	Identity     string `json:"identity"`
 	Version      string `json:"version"`
 	BoardName    string `json:"board_name"`
@@ -120,294 +214,92 @@ type jsonDeviceInfo struct {
 	TotalMemory  int64  `json:"total_memory"`
 }
 
-// toJSONDeviceInfo converts a DeviceInfo into the public JSON shape.
-func toJSONDeviceInfo(i DeviceInfo) jsonDeviceInfo {
-	return jsonDeviceInfo{
+func toAPIDeviceInfo(i DeviceInfo) apiDeviceInfo {
+	return apiDeviceInfo{
 		Identity: i.Identity, Version: i.Version, BoardName: i.BoardName,
 		Architecture: i.Architecture, Uptime: i.Uptime, CPULoad: i.CPULoad,
 		FreeMemory: i.FreeMemory, TotalMemory: i.TotalMemory,
 	}
 }
 
-// jsonBinding is the public shape of a hotspot IP binding.
-type jsonBinding struct {
+type apiBinding struct {
 	ID         string `json:"id"`
 	MACAddress string `json:"mac_address"`
 	Address    string `json:"address"`
 	ToAddress  string `json:"to_address"`
 	Server     string `json:"server"`
 	Type       string `json:"type"`
+	Blocked    bool   `json:"blocked"`
 	Comment    string `json:"comment"`
 	Disabled   bool   `json:"disabled"`
 }
 
-// toJSONBinding converts an IPBinding into the public JSON shape.
-func toJSONBinding(b IPBinding) jsonBinding {
-	return jsonBinding{
+func toAPIBinding(b IPBinding) apiBinding {
+	return apiBinding{
 		ID: b.ID, MACAddress: b.MACAddress, Address: b.Address,
 		ToAddress: b.ToAddress, Server: b.Server, Type: b.Type,
-		Comment: b.Comment, Disabled: b.Disabled,
+		Blocked: b.Blocked(), Comment: b.Comment, Disabled: b.Disabled,
 	}
 }
 
-// jsonBindingList is the envelope for GET /api/v1/routers/{id}/bindings.
-type jsonBindingList struct {
-	Bindings []jsonBinding `json:"bindings"`
-	Total    int           `json:"total"`
+type apiInterface struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	MTU        int64  `json:"mtu"`
+	MACAddress string `json:"mac_address"`
+	RxBytes    int64  `json:"rx_bytes"`
+	TxBytes    int64  `json:"tx_bytes"`
+	RxPackets  int64  `json:"rx_packets"`
+	TxPackets  int64  `json:"tx_packets"`
 }
 
-// jsonVoucher is the public shape of a voucher row. The password is never
-// exposed.
-type jsonVoucher struct {
-	ID           int64      `json:"id"`
-	Code         string     `json:"code"`
-	RouterID     int64      `json:"router_id"`
-	User         string     `json:"user"`
-	Status       string     `json:"status"`
-	TimeLimit    string     `json:"time_limit"`
-	DataLimitMB  int        `json:"data_limit_mb"`
-	ExpiresAt    time.Time  `json:"expires_at"`
-	UsedBytes    int64      `json:"used_bytes"`
-	UsedTime     string     `json:"used_time"`
-	CreatedAt    time.Time  `json:"created_at"`
-	RedeemedAt   *time.Time `json:"redeemed_at"`
-	MAC          string     `json:"mac,omitempty"`
-	IP           string     `json:"ip,omitempty"`
-	Serial       string     `json:"serial,omitempty"`
-}
-
-// toJSONVoucher converts a database Voucher into the public JSON shape.
-func toJSONVoucher(v database.Voucher) jsonVoucher {
-	return jsonVoucher{
-		ID: v.ID, Code: v.Code, RouterID: v.RouterID, User: v.User,
-		Status: v.Status, TimeLimit: v.TimeLimit, DataLimitMB: v.DataLimitMB,
-		ExpiresAt: v.ExpiresAt, UsedBytes: v.UsedBytes, UsedTime: v.UsedTime,
-		CreatedAt: v.CreatedAt, RedeemedAt: v.RedeemedAt,
-		MAC: v.MAC, IP: v.IP, Serial: v.Serial,
+func toAPIInterface(i InterfaceStats) apiInterface {
+	return apiInterface{
+		ID: i.ID, Name: i.Name, Type: i.Type, MTU: i.MTU,
+		MACAddress: i.MACAddress,
+		RxBytes:    i.RxBytes, TxBytes: i.TxBytes,
+		RxPackets: i.RxPackets, TxPackets: i.TxPackets,
 	}
 }
 
-// jsonCreateRouter is the request body for POST /api/v1/routers.
-type jsonCreateRouter struct {
-	Name          string `json:"name"`
-	Host          string `json:"host"`
-	Port          int    `json:"port"`
-	Username      string `json:"username"`
-	Password      string `json:"password"`
-	UseTLS        bool   `json:"use_tls"`
-	VerifyTLS     bool   `json:"verify_tls"`
-	Location      string `json:"location"`
-	PortalTag     string `json:"portal_tag"`
-	DefaultPortal bool   `json:"default_portal"`
-	Notes         string `json:"notes"`
+type apiVoucher struct {
+	ID              int64      `json:"id"`
+	Code            string     `json:"code"`
+	Batch           string     `json:"batch"`
+	RouterID        *int64     `json:"router_id"`
+	RouterName      string     `json:"router_name"`
+	Profile         string     `json:"profile"`
+	DurationMinutes int        `json:"duration_minutes"`
+	DataLimitMB     int        `json:"data_limit_mb"`
+	DeviceLimit     int        `json:"device_limit"`
+	PriceCents      int64      `json:"price_cents"`
+	Status          string     `json:"status"`
+	StatusLabel     string     `json:"status_label"`
+	Uses            int        `json:"uses"`
+	MaxUses         int        `json:"max_uses"`
+	RemainingUses   int        `json:"remaining_uses"`
+	Note            string     `json:"note"`
+	CreatedAt       time.Time  `json:"created_at"`
+	PushedAt        *time.Time `json:"pushed_at"`
+	ActivatedAt     *time.Time `json:"activated_at"`
+	ExpiresAt       *time.Time `json:"expires_at"`
+	LastUsedAt      *time.Time `json:"last_used_at"`
 }
 
-// validateCreateRouter checks the create request.
-func (r jsonCreateRouter) validate() string {
-	if strings.TrimSpace(r.Name) == "" {
-		return "name is required"
-	}
-	if len(r.Name) > 60 {
-		return "name must be at most 60 characters"
-	}
-	if strings.TrimSpace(r.Host) == "" {
-		return "host is required"
-	}
-	if r.Port <= 0 || r.Port > 65535 {
-		return "port must be between 1 and 65535"
-	}
-	if strings.TrimSpace(r.Username) == "" {
-		return "username is required"
-	}
-	if r.Password == "" {
-		return "password is required"
-	}
-	if len(r.PortalTag) > 40 {
-		return "portal_tag must be at most 40 characters"
-	}
-	return ""
-}
-
-// jsonUpdateRouter is the request body for PUT /api/v1/routers/{id}.
-type jsonUpdateRouter struct {
-	Name          string `json:"name"`
-	Host          string `json:"host"`
-	Port          int    `json:"port"`
-	Username      string `json:"username"`
-	Password      string `json:"password"`
-	UseTLS        bool   `json:"use_tls"`
-	VerifyTLS     bool   `json:"verify_tls"`
-	Location      string `json:"location"`
-	PortalTag     string `json:"portal_tag"`
-	DefaultPortal bool   `json:"default_portal"`
-	Notes         string `json:"notes"`
-}
-
-// validateUpdateRouter checks the update request.
-func (r jsonUpdateRouter) validate() string {
-	if strings.TrimSpace(r.Name) == "" {
-		return "name is required"
-	}
-	if len(r.Name) > 60 {
-		return "name must be at most 60 characters"
-	}
-	if strings.TrimSpace(r.Host) == "" {
-		return "host is required"
-	}
-	if r.Port <= 0 || r.Port > 65535 {
-		return "port must be between 1 and 65535"
-	}
-	if strings.TrimSpace(r.Username) == "" {
-		return "username is required"
-	}
-	if len(r.PortalTag) > 40 {
-		return "portal_tag must be at most 40 characters"
-	}
-	return ""
-}
-
-// toRouter converts the update request into a database Router.
-func (r jsonUpdateRouter) toRouter() database.Router {
-	return database.Router{
-		Name: strings.TrimSpace(r.Name), Host: strings.TrimSpace(r.Host),
-		Port: r.Port, Username: strings.TrimSpace(r.Username),
-		Password: r.Password, UseTLS: r.UseTLS, VerifyTLS: r.VerifyTLS,
-		Location: strings.TrimSpace(r.Location),
-		PortalTag: strings.TrimSpace(r.PortalTag),
-		DefaultPortal: r.DefaultPortal, Notes: strings.TrimSpace(r.Notes),
+func toAPIVoucher(v database.Voucher) apiVoucher {
+	return apiVoucher{
+		ID: v.ID, Code: v.Code, Batch: v.Batch, RouterID: v.RouterID,
+		RouterName: v.RouterName, Profile: v.Profile,
+		DurationMinutes: v.DurationMinutes, DataLimitMB: v.DataLimitMB,
+		DeviceLimit: v.DeviceLimit, PriceCents: v.PriceCents,
+		Status: string(v.Status), StatusLabel: v.Status.Label(),
+		Uses: v.Uses, MaxUses: v.MaxUses, RemainingUses: v.RemainingUses(),
+		Note: v.Note, CreatedAt: v.CreatedAt, PushedAt: v.PushedAt,
+		ActivatedAt: v.ActivatedAt, ExpiresAt: v.ExpiresAt,
+		LastUsedAt: v.LastUsedAt,
 	}
 }
-
-// jsonCreateVoucher is the request body for POST /api/v1/vouchers.
-type jsonCreateVoucher struct {
-	RouterID    int64  `json:"router_id"`
-	User        string `json:"user"`
-	Password     string `json:"password"`
-	TimeLimit   string `json:"time_limit"`
-	DataLimitMB int    `json:"data_limit_mb"`
-	Count       int    `json:"count"`
-}
-
-// validateCreateVoucher checks the create request.
-func (r jsonCreateVoucher) validate() string {
-	if r.RouterID <= 0 {
-		return "router_id is required"
-	}
-	if strings.TrimSpace(r.User) == "" {
-		return "user is required"
-	}
-	if r.Password == "" {
-		return "password is required"
-	}
-	if r.Count <= 0 {
-		return "count must be at least 1"
-	}
-	if r.DataLimitMB < 0 {
-		return "data_limit_mb must be zero or positive"
-	}
-	return ""
-}
-
-// toSpec converts the create request into a database VoucherSpec.
-func (r jsonCreateVoucher) toSpec() database.VoucherSpec {
-	return database.VoucherSpec{
-		User: strings.TrimSpace(r.User), Password: r.Password,
-		TimeLimit: r.TimeLimit, DataLimitMB: r.DataLimitMB, Count: r.Count,
-	}
-}
-
-// jsonCommand is the request body for POST /api/v1/routers/{id}/command.
-type jsonCommand struct {
-	Command string   `json:"command"`
-	Args    []string `json:"args"`
-}
-
-// validateCommand checks the command request.
-func (r jsonCommand) validate() string {
-	if strings.TrimSpace(r.Command) == "" {
-		return "command is required"
-	}
-	return ""
-}
-
-// jsonCommandReply is the response body for a command execution.
-type jsonCommandReply struct {
-	ID   string               `json:"id"`
-	Rows []map[string]string  `json:"rows"`
-	Done map[string]string    `json:"done"`
-}
-
-// jsonPortalLoginRequest is the request body for POST /api/v1/portal/login.
-type jsonPortalLoginRequest struct {
-	MAC           string `json:"mac"`
-	IP            string `json:"ip"`
-	Username      string `json:"username"`
-	Password      string `json:"password"`
-	LinkLogin     string `json:"link_login"`
-	LinkLoginOnly string `json:"link_login_only"`
-	LinkOrig      string `json:"link_orig"`
-	ServerName    string `json:"server_name"`
-	ChapID        string `json:"chap_id"`
-	ChapChallenge string `json:"chap_challenge"`
-}
-
-// ---------------------------------------------------------------------------
-// API route registration
-// ---------------------------------------------------------------------------
-
-// RoutesAPI wires the REST API endpoints under /api/v1. It is called from
-// Routes() so the API shares the same middleware (security headers, CSRF,
-// panic recovery) as the web UI.
-func (h *Handler) RoutesAPI(mux *http.ServeMux) {
-	// Discovery and health.
-	mux.HandleFunc("GET /api/v1/health", h.apiHealth)
-
-	// Router inventory.
-	mux.HandleFunc("GET /api/v1/routers", h.apiRoutersList)
-	mux.HandleFunc("POST /api/v1/routers", h.apiRouterCreate)
-	mux.HandleFunc("GET /api/v1/routers/{id}", h.apiRouterGet)
-	mux.HandleFunc("PUT /api/v1/routers/{id}", h.apiRouterUpdate)
-	mux.HandleFunc("DELETE /api/v1/routers/{id}", h.apiRouterDelete)
-	mux.HandleFunc("POST /api/v1/routers/{id}/test", h.apiRouterTest)
-	mux.HandleFunc("GET /api/v1/routers/{id}/device", h.apiRouterDevice)
-	mux.HandleFunc("GET /api/v1/routers/{id}/clients", h.apiRouterClients)
-	mux.HandleFunc("GET /api/v1/routers/{id}/bindings", h.apiRouterBindings)
-	mux.HandleFunc("POST /api/v1/routers/{id}/clients/{clientId:(.+)}/disconnect", h.apiClientDisconnect)
-	mux.HandleFunc("POST /api/v1/routers/{id}/clients/block", h.apiClientBlock)
-	mux.HandleFunc("POST /api/v1/routers/{id}/clients/unblock", h.apiClientUnblock)
-	mux.HandleFunc("POST /api/v1/routers/{id}/command", h.apiCommand)
-
-	// Vouchers.
-	mux.HandleFunc("GET /api/v1/vouchers", h.apiVouchersList)
-	mux.HandleFunc("POST /api/v1/vouchers", h.apiVoucherCreate)
-	mux.HandleFunc("GET /api/v1/vouchers/{code}", h.apiVoucherGet)
-	mux.HandleFunc("POST /api/v1/vouchers/{code}/redeem", h.apiVoucherRedeem)
-	mux.HandleFunc("DELETE /api/v1/vouchers/{id}", h.apiVoucherDelete)
-
-	// Portal login accepts the MikroTik redirect parameters either as JSON or
-	// as a standard form, so external systems and the captive portal can both
-	// use the same endpoint.
-	mux.HandleFunc("POST /api/v1/portal/login", h.apiPortalLogin)
-}
-
-// withCORS wraps a handler with lightweight CORS headers suitable for a
-// controller that may be called from a browser admin UI or an external system.
-func withCORS(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Requested-With")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next(w, r)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Health
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Router inventory
@@ -415,660 +307,846 @@ func withCORS(next http.HandlerFunc) http.HandlerFunc {
 
 // apiRoutersList returns every registered router.
 func (h *Handler) apiRoutersList(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	routers, err := h.db.Routers().List(ctx)
+	routers, err := h.db.Routers().List(r.Context())
 	if err != nil {
-		h.writeJSONError(w, http.StatusInternalServerError, "db_error",
-			"failed to load router inventory")
 		h.log.Error("api routers list", "error", err)
+		h.writeAPIError(w, http.StatusInternalServerError, "db_error",
+			"failed to load routers")
 		return
 	}
-	out := make([]jsonRouter, 0, len(routers))
-	for _, router := range routers {
-		out = append(out, toJSONRouter(router))
+	out := make([]apiRouter, 0, len(routers))
+	for _, r := range routers {
+		out = append(out, toAPIRouter(r))
 	}
-	h.writeJSON(w, http.StatusOK, jsonRouterList{
-		Routers: out,
-		Total:   int64(len(out)),
+	h.writeAPIJSON(w, http.StatusOK, map[string]any{
+		"routers": out,
+		"total":   len(out),
 	})
 }
 
-// apiRouterCreate registers a new router from a JSON body.
+// apiRouterGet returns one router by id. It reads the inventory only and does
+// not require the device to be reachable.
+func (h *Handler) apiRouterGet(w http.ResponseWriter, r *http.Request) {
+	router, ok := h.apiRouterLookupDB(w, r)
+	if !ok {
+		return
+	}
+	h.writeAPIJSON(w, http.StatusOK, toAPIRouter(router))
+}
+
+// apiRouterCreate registers a new router.
 func (h *Handler) apiRouterCreate(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	var req jsonCreateRouter
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeJSONError(w, http.StatusBadRequest, "bad_request",
-			"request body must be valid JSON")
+	var req struct {
+		Name          string `json:"name"`
+		Host          string `json:"host"`
+		Port          int    `json:"port"`
+		Username      string `json:"username"`
+		Password      string `json:"password"`
+		UseTLS        bool   `json:"use_tls"`
+		VerifyTLS     bool   `json:"verify_tls"`
+		Location      string `json:"location"`
+		PortalTag     string `json:"portal_tag"`
+		DefaultPortal bool   `json:"default_portal"`
+		Notes         string `json:"notes"`
+	}
+	if !decodeAPIBody(r, &req) {
+		h.writeAPIError(w, http.StatusBadRequest, "bad_request",
+			"invalid JSON body")
 		return
 	}
-	if msg := req.validate(); msg != "" {
-		h.writeJSONError(w, http.StatusUnprocessableEntity, "validation_error", msg)
+	switch {
+	case strings.TrimSpace(req.Name) == "":
+		h.writeAPIError(w, http.StatusBadRequest, "validation", "name is required")
+		return
+	case strings.TrimSpace(req.Host) == "":
+		h.writeAPIError(w, http.StatusBadRequest, "validation", "host is required")
+		return
+	case strings.TrimSpace(req.Username) == "":
+		h.writeAPIError(w, http.StatusBadRequest, "validation", "username is required")
 		return
 	}
-	router := req.toRouter()
-	created, err := h.db.Routers().Create(ctx, router)
+	router := database.Router{
+		Name:          strings.TrimSpace(req.Name),
+		Host:          strings.TrimSpace(req.Host),
+		Port:          req.Port,
+		Username:      strings.TrimSpace(req.Username),
+		Password:      req.Password,
+		UseTLS:        req.UseTLS,
+		VerifyTLS:     req.VerifyTLS,
+		Location:      strings.TrimSpace(req.Location),
+		PortalTag:     strings.TrimSpace(req.PortalTag),
+		DefaultPortal: req.DefaultPortal,
+		Notes:         strings.TrimSpace(req.Notes),
+	}
+	created, err := h.db.Routers().Create(r.Context(), router)
 	if err != nil {
-		h.log.Error("api router create", "name", router.Name, "error", err)
-		if errors.Is(err, database.ErrDuplicateName) {
-			h.writeJSONError(w, http.StatusConflict, "duplicate_name",
-				fmt.Sprintf("a router named %q already exists", router.Name))
+		if strings.Contains(err.Error(), "already exists") {
+			h.writeAPIError(w, http.StatusConflict, "conflict", err.Error())
 			return
 		}
-		h.writeJSONError(w, http.StatusInternalServerError, "db_error",
+		h.log.Error("api router create", "error", err)
+		h.writeAPIError(w, http.StatusInternalServerError, "db_error",
 			"failed to create router")
 		return
 	}
-	h.writeJSON(w, http.StatusCreated, toJSONRouter(created))
+	h.writeAPIJSON(w, http.StatusCreated, toAPIRouter(created))
 }
 
-// apiRouterGet returns a single router by id.
-func (h *Handler) apiRouterGet(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	id, ok := h.routerIDPath(w, r)
-	if !ok {
-		return
-	}
-	router, err := h.db.Routers().Get(ctx, id)
-	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			h.writeJSONError(w, http.StatusNotFound, "not_found",
-				fmt.Sprintf("router %d does not exist", id))
-			return
-		}
-		h.writeJSONError(w, http.StatusInternalServerError, "db_error",
-			"failed to load router")
-		h.log.Error("api router get", "id", id, "error", err)
-		return
-	}
-	h.writeJSON(w, http.StatusOK, toJSONRouter(router))
-}
-
-// apiRouterUpdate updates a router from a JSON body.
+// apiRouterUpdate applies a PUT. An omitted password keeps the stored secret.
 func (h *Handler) apiRouterUpdate(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	id, ok := h.routerIDPath(w, r)
-	if !ok {
-		return
-	}
-	var req jsonUpdateRouter
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeJSONError(w, http.StatusBadRequest, "bad_request",
-			"request body must be valid JSON")
-		return
-	}
-	if msg := req.validate(); msg != "" {
-		h.writeJSONError(w, http.StatusUnprocessableEntity, "validation_error", msg)
-		return
-	}
-	existing, err := h.db.Routers().Get(ctx, id)
-	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			h.writeJSONError(w, http.StatusNotFound, "not_found",
-				fmt.Sprintf("router %d does not exist", id))
-			return
-		}
-		h.writeJSONError(w, http.StatusInternalServerError, "db_error",
-			"failed to load router")
-		h.log.Error("api router update", "id", id, "error", err)
-		return
-	}
-	router := req.toRouter()
-	router.ID = id
-	if router.Password == "" {
-		router.Password = existing.Password
-	}
-	updated, err := h.db.Routers().Update(ctx, router)
-	if err != nil {
-		h.log.Error("api router update", "id", id, "error", err)
-		if errors.Is(err, database.ErrDuplicateName) {
-			h.writeJSONError(w, http.StatusConflict, "duplicate_name",
-				fmt.Sprintf("a router named %q already exists", router.Name))
-			return
-		}
-		h.writeJSONError(w, http.StatusInternalServerError, "db_error",
-			"failed to update router")
-		return
-	}
-	h.writeJSON(w, http.StatusOK, toJSONRouter(updated))
-}
-
-// apiRouterTest tests the API connectivity of a router and returns the device
-// info together with the connection latency.
-func (h *Handler) apiRouterTest(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	id, ok := h.routerIDPath(w, r)
-	if !ok {
-		return
-	}
-	router, err := h.db.Routers().Get(ctx, id)
-	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			h.writeJSONError(w, http.StatusNotFound, "not_found",
-				fmt.Sprintf("router %d does not exist", id))
-			return
-		}
-		h.writeJSONError(w, http.StatusInternalServerError, "db_error",
-			"failed to load router")
-		h.log.Error("api router test", "id", id, "error", err)
-		return
-	}
-
-	client, err := h.dialRouter(ctx, router)
-	if err != nil {
-		h.writeJSONError(w, http.StatusBadGateway, "router_unreachable",
-			routerErrorHint(err))
-		return
-	}
-	defer client.Close()
-
-	info, err := client.DeviceInfo(ctx)
-	if err != nil {
-		h.writeJSONError(w, http.StatusBadGateway, "router_error",
-			routerErrorHint(err))
-		return
-	}
-	h.writeJSON(w, http.StatusOK, map[string]any{
-		"device":    toJSONDeviceInfo(info),
-		"connected": true,
-	})
-}
-
-// apiRouterDevice returns the identity and resource snapshot of a router.
-func (h *Handler) apiRouterDevice(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	id, ok := h.routerIDPath(w, r)
-	if !ok {
-		return
-	}
-	router, err := h.db.Routers().Get(ctx, id)
-	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			h.writeJSONError(w, http.StatusNotFound, "not_found",
-				fmt.Sprintf("router %d does not exist", id))
-			return
-		}
-		h.writeJSONError(w, http.StatusInternalServerError, "db_error",
-			"failed to load router")
-		h.log.Error("api router device", "id", id, "error", err)
-		return
-	}
-	client, err := h.dialRouter(ctx, router)
-	if err != nil {
-		h.writeJSONError(w, http.StatusBadGateway, "router_unreachable",
-			routerErrorHint(err))
-		return
-	}
-	defer client.Close()
-
-	info, err := client.DeviceInfo(ctx)
-	if err != nil {
-		h.writeJSONError(w, http.StatusBadGateway, "router_error",
-			routerErrorHint(err))
-		return
-	}
-	h.writeJSON(w, http.StatusOK, toJSONDeviceInfo(info))
-}
-
-// apiRouterClients returns the active hotspot clients on a router.
-func (h *Handler) apiRouterClients(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	id, ok := h.routerIDPath(w, r)
-	if !ok {
-		return
-	}
-	router, err := h.db.Routers().Get(ctx, id)
-	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			h.writeJSONError(w, http.StatusNotFound, "not_found",
-				fmt.Sprintf("router %d does not exist", id))
-			return
-		}
-		h.writeJSONError(w, http.StatusInternalServerError, "db_error",
-			"failed to load router")
-		h.log.Error("api router clients", "id", id, "error", err)
-		return
-	}
-	client, err := h.dialRouter(ctx, router)
-	if err != nil {
-		h.writeJSONError(w, http.StatusBadGateway, "router_unreachable",
-			routerErrorHint(err))
-		return
-	}
-	defer client.Close()
-
-	clients, err := client.ActiveHotspotClients(ctx)
-	if err != nil {
-		h.writeJSONError(w, http.StatusBadGateway, "router_error",
-			routerErrorHint(err))
-		return
-	}
-	out := make([]jsonClient, 0, len(clients))
-	for _, c := range clients {
-		out = append(out, toJSONClient(c))
-	}
-	h.writeJSON(w, http.StatusOK, map[string]any{
-		"clients":  out,
-		"total":    len(out),
-		"router_id": id,
-	})
-}
-
-// apiClientDisconnect ends a hotspot session by its RouterOS .id or by user
-// name.
-func (h *Handler) apiClientDisconnect(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	id, ok := h.routerIDPath(w, r)
-	if !ok {
-		return
-	}
-	clientID := r.PathValue("clientId")
-	if clientID == "" {
-		h.writeJSONError(w, http.StatusBadRequest, "bad_request",
-			"client id is required")
-		return
-	}
-	router, err := h.db.Routers().Get(ctx, id)
-	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			h.writeJSONError(w, http.StatusNotFound, "not_found",
-				fmt.Sprintf("router %d does not exist", id))
-			return
-		}
-		h.writeJSONError(w, http.StatusInternalServerError, "db_error",
-			"failed to load router")
-		h.log.Error("api client disconnect", "id", id, "error", err)
-		return
-	}
-	client, err := h.dialRouter(ctx, router)
-	if err != nil {
-		h.writeJSONError(w, http.StatusBadGateway, "router_unreachable",
-			routerErrorHint(err))
-		return
-	}
-	defer client.Close()
-
-	err = client.DisconnectClient(ctx, clientID, "")
-	if err != nil && (errors.Is(err, ErrRouterNotFound) || errors.Is(err, ErrRouterUnknownHost)) {
-		if _, userErr := client.Run(ctx, "/ip/hotspot/user/print", "?name="+clientID); userErr == nil {
-			if dErr := client.DisconnectClient(ctx, "", clientID); dErr == nil {
-				err = nil
-			} else {
-				err = dErr
-			}
-		}
-	}
-	if err != nil {
-		h.writeJSONError(w, http.StatusBadGateway, "router_error",
-			routerErrorHint(err))
-		return
-	}
-	h.writeJSON(w, http.StatusOK, map[string]string{
-		"status":    "disconnected",
-		"client_id": clientID,
-	})
-}
-
-// apiClientBlock blocks a client by MAC address using a hotspot IP binding.
-func (h *Handler) apiClientBlock(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	id, ok := h.routerIDPath(w, r)
-	if !ok {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		h.writeAPIError(w, http.StatusBadRequest, "invalid_id",
+			"router id must be a positive integer")
 		return
 	}
 	var req struct {
-		MAC    string `json:"mac"`
-		Comment string `json:"comment"`
+		Name          string `json:"name"`
+		Host          string `json:"host"`
+		Port          int    `json:"port"`
+		Username      string `json:"username"`
+		Password      string `json:"password"`
+		UseTLS        bool   `json:"use_tls"`
+		VerifyTLS     bool   `json:"verify_tls"`
+		Location      string `json:"location"`
+		PortalTag     string `json:"portal_tag"`
+		DefaultPortal bool   `json:"default_portal"`
+		Notes         string `json:"notes"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeJSONError(w, http.StatusBadRequest, "bad_request",
-			"request body must be valid JSON")
+	if !decodeAPIBody(r, &req) {
+		h.writeAPIError(w, http.StatusBadRequest, "bad_request",
+			"invalid JSON body")
 		return
 	}
-	if req.MAC == "" {
-		h.writeJSONError(w, http.StatusBadRequest, "bad_request",
-			"mac is required")
+	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Host) == "" ||
+		strings.TrimSpace(req.Username) == "" {
+		h.writeAPIError(w, http.StatusBadRequest, "validation",
+			"name, host and username are required")
 		return
 	}
-	router, err := h.db.Routers().Get(ctx, id)
+	updated, err := h.db.Routers().Update(r.Context(), database.Router{
+		ID:            id,
+		Name:          strings.TrimSpace(req.Name),
+		Host:          strings.TrimSpace(req.Host),
+		Port:          req.Port,
+		Username:      strings.TrimSpace(req.Username),
+		Password:      req.Password,
+		UseTLS:        req.UseTLS,
+		VerifyTLS:     req.VerifyTLS,
+		Location:      strings.TrimSpace(req.Location),
+		PortalTag:     strings.TrimSpace(req.PortalTag),
+		DefaultPortal: req.DefaultPortal,
+		Notes:         strings.TrimSpace(req.Notes),
+	})
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			h.writeJSONError(w, http.StatusNotFound, "not_found",
+			h.writeAPIError(w, http.StatusNotFound, "not_found",
 				fmt.Sprintf("router %d does not exist", id))
 			return
 		}
-		h.writeJSONError(w, http.StatusInternalServerError, "db_error",
-			"failed to load router")
-		h.log.Error("api client block", "id", id, "error", err)
+		if strings.Contains(err.Error(), "already exists") {
+			h.writeAPIError(w, http.StatusConflict, "conflict", err.Error())
+			return
+		}
+		h.log.Error("api router update", "id", id, "error", err)
+		h.writeAPIError(w, http.StatusInternalServerError, "db_error",
+			"failed to update router")
 		return
 	}
-	client, err := h.dialRouter(ctx, router)
-	if err != nil {
-		h.writeJSONError(w, http.StatusBadGateway, "router_unreachable",
-			routerErrorHint(err))
+	h.writeAPIJSON(w, http.StatusOK, toAPIRouter(updated))
+}
+
+// apiRouterDelete removes a router and cascades its tracked sessions.
+func (h *Handler) apiRouterDelete(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		h.writeAPIError(w, http.StatusBadRequest, "invalid_id",
+			"router id must be a positive integer")
+		return
+	}
+	if err := h.db.Routers().Delete(r.Context(), id); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			h.writeAPIError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("router %d does not exist", id))
+			return
+		}
+		h.log.Error("api router delete", "id", id, "error", err)
+		h.writeAPIError(w, http.StatusInternalServerError, "db_error",
+			"failed to delete router")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// apiRouterTest probes connectivity and returns the device identity.
+func (h *Handler) apiRouterTest(w http.ResponseWriter, r *http.Request) {
+	router, client, ok := h.apiRouterLookup(w, r)
+	if !ok {
 		return
 	}
 	defer client.Close()
-
-	bindingID, err := client.BlockMAC(ctx, req.MAC, req.Comment)
+	info, err := client.DeviceInfo(r.Context())
 	if err != nil {
-		h.writeJSONError(w, http.StatusBadGateway, "router_error",
+		h.writeAPIError(w, http.StatusBadGateway, "device_error",
 			routerErrorHint(err))
 		return
 	}
-	h.writeJSON(w, http.StatusOK, map[string]any{
+	identity := info.Identity
+	if identity == "" {
+		identity = router.Host
+	}
+	h.writeAPIJSON(w, http.StatusOK, map[string]any{
+		"connected":  true,
+		"identity":   identity,
+		"version":    info.Version,
+		"board":      info.BoardName,
+		"latency_ms": router.LastLatencyMS,
+	})
+}
+
+// apiRouterDevice returns identity and resource usage of one device.
+func (h *Handler) apiRouterDevice(w http.ResponseWriter, r *http.Request) {
+	_, client, ok := h.apiRouterLookup(w, r)
+	if !ok {
+		return
+	}
+	defer client.Close()
+	info, err := client.DeviceInfo(r.Context())
+	if err != nil {
+		h.writeAPIError(w, http.StatusBadGateway, "device_error",
+			routerErrorHint(err))
+		return
+	}
+	h.writeAPIJSON(w, http.StatusOK, toAPIDeviceInfo(info))
+}
+
+// apiRouterClients lists the clients currently online on the hotspot.
+func (h *Handler) apiRouterClients(w http.ResponseWriter, r *http.Request) {
+	_, client, ok := h.apiRouterLookup(w, r)
+	if !ok {
+		return
+	}
+	defer client.Close()
+	clients, err := client.ActiveHotspotClients(r.Context())
+	if err != nil {
+		h.writeAPIError(w, http.StatusBadGateway, "query_failed",
+			routerErrorHint(err))
+		return
+	}
+	out := make([]apiClient, 0, len(clients))
+	for _, c := range clients {
+		out = append(out, toAPIClient(c))
+	}
+	h.writeAPIJSON(w, http.StatusOK, map[string]any{
+		"clients": out,
+		"total":   len(out),
+	})
+}
+
+// apiRouterBindings lists the hotspot IP bindings of one device.
+func (h *Handler) apiRouterBindings(w http.ResponseWriter, r *http.Request) {
+	_, client, ok := h.apiRouterLookup(w, r)
+	if !ok {
+		return
+	}
+	defer client.Close()
+	bindings, err := client.IPBindings(r.Context())
+	if err != nil {
+		h.writeAPIError(w, http.StatusBadGateway, "query_failed",
+			routerErrorHint(err))
+		return
+	}
+	out := make([]apiBinding, 0, len(bindings))
+	for _, b := range bindings {
+		out = append(out, toAPIBinding(b))
+	}
+	h.writeAPIJSON(w, http.StatusOK, map[string]any{
+		"bindings": out,
+		"total":    len(out),
+	})
+}
+
+// apiRouterInterfaces lists the interfaces of one device with byte counters.
+func (h *Handler) apiRouterInterfaces(w http.ResponseWriter, r *http.Request) {
+	_, client, ok := h.apiRouterLookup(w, r)
+	if !ok {
+		return
+	}
+	defer client.Close()
+	interfaces, err := client.InterfaceList(r.Context())
+	if err != nil {
+		h.writeAPIError(w, http.StatusBadGateway, "query_failed",
+			routerErrorHint(err))
+		return
+	}
+	out := make([]apiInterface, 0, len(interfaces))
+	for _, i := range interfaces {
+		out = append(out, toAPIInterface(i))
+	}
+	h.writeAPIJSON(w, http.StatusOK, map[string]any{
+		"interfaces": out,
+		"total":      len(out),
+	})
+}
+
+// apiRouterInterfaceTraffic samples one interface for the live traffic graph.
+func (h *Handler) apiRouterInterfaceTraffic(w http.ResponseWriter, r *http.Request) {
+	_, client, ok := h.apiRouterLookup(w, r)
+	if !ok {
+		return
+	}
+	defer client.Close()
+	iface := r.PathValue("iface")
+	stats, err := client.MonitorInterface(r.Context(), iface)
+	if err != nil {
+		if errors.Is(err, ErrRouterNotFound) {
+			h.writeAPIError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("interface %q not found on this device", iface))
+			return
+		}
+		h.writeAPIError(w, http.StatusBadGateway, "query_failed",
+			routerErrorHint(err))
+		return
+	}
+	h.writeAPIJSON(w, http.StatusOK, map[string]any{
+		"interface": toAPIInterface(stats),
+		"rx_rate":   stats.RxRate,
+		"tx_rate":   stats.TxRate,
+		"timestamp": time.Now().UTC(),
+	})
+}
+
+// apiClientDisconnect ends one hotspot session by client id or username.
+func (h *Handler) apiClientDisconnect(w http.ResponseWriter, r *http.Request) {
+	_, client, ok := h.apiRouterLookup(w, r)
+	if !ok {
+		return
+	}
+	defer client.Close()
+	var req struct {
+		ClientID string `json:"client_id"`
+		User     string `json:"user"`
+	}
+	_ = decodeAPIBody(r, &req)
+	id := r.PathValue("cid")
+	if id == "" {
+		id = req.ClientID
+	}
+	if id == "" && req.User == "" {
+		h.writeAPIError(w, http.StatusBadRequest, "validation",
+			"provide the client id in the path or a user in the body")
+		return
+	}
+	if err := client.DisconnectClient(r.Context(), id, req.User); err != nil {
+		if errors.Is(err, ErrRouterNotFound) {
+			h.writeAPIError(w, http.StatusNotFound, "not_found",
+				"no such active client on this device")
+			return
+		}
+		h.writeAPIError(w, http.StatusBadGateway, "disconnect_failed",
+			routerErrorHint(err))
+		return
+	}
+	h.db.Sessions().Close(r.Context(), 0, id, "api disconnect", time.Now())
+	h.writeAPIJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
+}
+
+// apiClientBlock adds a blocked IP binding for a MAC address.
+func (h *Handler) apiClientBlock(w http.ResponseWriter, r *http.Request) {
+	_, client, ok := h.apiRouterLookup(w, r)
+	if !ok {
+		return
+	}
+	defer client.Close()
+	var req struct {
+		MAC     string `json:"mac"`
+		Comment string `json:"comment"`
+	}
+	if !decodeAPIBody(r, &req) || strings.TrimSpace(req.MAC) == "" {
+		h.writeAPIError(w, http.StatusBadRequest, "validation",
+			"mac is required")
+		return
+	}
+	bindingID, err := client.BlockMAC(r.Context(), req.MAC, req.Comment)
+	if err != nil {
+		if errors.Is(err, ErrRouterConflict) {
+			h.writeAPIError(w, http.StatusConflict, "conflict",
+				"this MAC already has an IP binding on the device")
+			return
+		}
+		h.writeAPIError(w, http.StatusBadGateway, "block_failed",
+			routerErrorHint(err))
+		return
+	}
+	h.db.Sessions().CloseByMAC(r.Context(), 0,
+		database.NormalizeMAC(req.MAC), "blocked via api", time.Now())
+	h.writeAPIJSON(w, http.StatusCreated, map[string]any{
 		"status":     "blocked",
 		"mac":        database.FormatMAC(req.MAC),
 		"binding_id": bindingID,
 	})
 }
 
-// apiClientUnblock removes a hotspot IP binding by id or by MAC address.
+// apiClientUnblock removes an IP binding, matched by id or MAC.
 func (h *Handler) apiClientUnblock(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	id, ok := h.routerIDPath(w, r)
+	_, client, ok := h.apiRouterLookup(w, r)
 	if !ok {
 		return
 	}
+	defer client.Close()
 	var req struct {
 		BindingID string `json:"binding_id"`
 		MAC       string `json:"mac"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeJSONError(w, http.StatusBadRequest, "bad_request",
-			"request body must be valid JSON")
-		return
+	if !decodeAPIBody(r, &req) {
+		req.BindingID = strings.TrimSpace(r.PostFormValue("binding_id"))
+		req.MAC = strings.TrimSpace(r.PostFormValue("mac"))
 	}
-	if req.BindingID == "" && req.MAC == "" {
-		h.writeJSONError(w, http.StatusBadRequest, "bad_request",
-			"binding_id or mac is required")
-		return
-	}
-	router, err := h.db.Routers().Get(ctx, id)
-	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			h.writeJSONError(w, http.StatusNotFound, "not_found",
-				fmt.Sprintf("router %d does not exist", id))
-			return
-		}
-		h.writeJSONError(w, http.StatusInternalServerError, "db_error",
-			"failed to load router")
-		h.log.Error("api client unblock", "id", id, "error", err)
-		return
-	}
-	client, err := h.dialRouter(ctx, router)
-	if err != nil {
-		h.writeJSONError(w, http.StatusBadGateway, "router_unreachable",
-			routerErrorHint(err))
-		return
-	}
-	defer client.Close()
-
-	if req.BindingID != "" {
-		if err := client.UnblockBinding(ctx, req.BindingID); err != nil {
-			h.writeJSONError(w, http.StatusBadGateway, "router_error",
+	bindingID := req.BindingID
+	if bindingID == "" && req.MAC != "" {
+		bindings, err := client.IPBindings(r.Context())
+		if err != nil {
+			h.writeAPIError(w, http.StatusBadGateway, "query_failed",
 				routerErrorHint(err))
 			return
 		}
-		h.writeJSON(w, http.StatusOK, map[string]string{
-			"status":     "unblocked",
-			"binding_id": req.BindingID,
-		})
+		want := database.FormatMAC(req.MAC)
+		for _, b := range bindings {
+			if strings.EqualFold(b.MACAddress, want) {
+				bindingID = b.ID
+				break
+			}
+		}
+		if bindingID == "" {
+			h.writeAPIError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("no IP binding for %s on this device", want))
+			return
+		}
+	}
+	if bindingID == "" {
+		h.writeAPIError(w, http.StatusBadRequest, "validation",
+			"provide binding_id or mac")
 		return
 	}
-	bindingID, err := client.BlockMAC(ctx, req.MAC, "")
-	if err != nil {
-		h.writeJSONError(w, http.StatusBadGateway, "router_error",
+	if err := client.UnblockBinding(r.Context(), bindingID); err != nil {
+		if errors.Is(err, ErrRouterNotFound) {
+			h.writeAPIError(w, http.StatusNotFound, "not_found",
+				"binding no longer exists on the device")
+			return
+		}
+		h.writeAPIError(w, http.StatusBadGateway, "unblock_failed",
 			routerErrorHint(err))
 		return
 	}
-	if err := client.UnblockBinding(ctx, bindingID); err != nil {
-		h.writeJSONError(w, http.StatusBadGateway, "router_error",
-			routerErrorHint(err))
-		return
-	}
-	h.writeJSON(w, http.StatusOK, map[string]string{
-		"status": "unblocked",
-		"mac":    database.FormatMAC(req.MAC),
-	})
+	h.writeAPIJSON(w, http.StatusOK, map[string]string{"status": "unblocked"})
 }
 
-// jsonCommandReplyFromReply converts a RouterOS Reply into the public JSON
-// shape.
-func jsonCommandReplyFromReply(r Reply) jsonCommandReply {
-	out := jsonCommandReply{
-		ID:   r.ID(),
-		Rows: r.Re,
-		Done: r.Done,
+// apiRouterCommand runs an arbitrary RouterOS command. This is the escape
+// hatch for RouterOS v7 features the controller does not model explicitly.
+func (h *Handler) apiRouterCommand(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Command string   `json:"command"`
+		Args    []string `json:"args"`
 	}
-	if out.Rows == nil {
-		out.Rows = []map[string]string{}
-	}
-	if out.Done == nil {
-		out.Done = map[string]string{}
-	}
-	return out
-}
-
-// apiVouchersList returns vouchers filtered by router_id when the query string
-// includes it.
-func (h *Handler) apiVouchersList(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	query := r.URL.Query()
-	var routerID int64
-	if raw := query.Get("router_id"); raw != "" {
-		if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
-			routerID = n
-		}
-	}
-	vouchers, err := h.db.Vouchers().List(ctx, database.VoucherFilter{
-		RouterID: routerID,
-		Limit:    1000,
-	})
-	if err != nil {
-		h.writeJSONError(w, http.StatusInternalServerError, "db_error",
-			"failed to load vouchers")
-		h.log.Error("api vouchers list", "error", err)
+	if !decodeAPIBody(r, &req) || strings.TrimSpace(req.Command) == "" {
+		h.writeAPIError(w, http.StatusBadRequest, "validation",
+			"command is required, e.g. \"/interface/print\"")
 		return
 	}
-	out := make([]jsonVoucher, 0, len(vouchers))
-	for _, v := range vouchers {
-		out = append(out, toJSONVoucher(v))
-	}
-	h.writeJSON(w, http.StatusOK, jsonVoucherList{
-		Vouchers: out,
-		Total:    int64(len(out)),
-	})
-}
-
-// apiVoucherCreate generates one or more vouchers for a router.
-func (h *Handler) apiVoucherCreate(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	var req jsonCreateVoucher
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeJSONError(w, http.StatusBadRequest, "bad_request",
-			"request body must be valid JSON")
+	command := strings.TrimSpace(req.Command)
+	if !strings.HasPrefix(command, "/") {
+		h.writeAPIError(w, http.StatusBadRequest, "validation",
+			"command must start with /, e.g. \"/interface/print\"")
 		return
 	}
-	if msg := req.validate(); msg != "" {
-		h.writeJSONError(w, http.StatusUnprocessableEntity, "validation_error", msg)
-		return
-	}
-	spec := req.toSpec()
-	vouchers, err := h.db.Vouchers().Generate(ctx, req.RouterID, spec)
-	if err != nil {
-		h.log.Error("api voucher create", "router_id", req.RouterID, "error", err)
-		if errors.Is(err, database.ErrNotFound) {
-			h.writeJSONError(w, http.StatusNotFound, "not_found",
-				fmt.Sprintf("router %d does not exist", req.RouterID))
-			return
-		}
-		h.writeJSONError(w, http.StatusInternalServerError, "db_error",
-			"failed to create vouchers")
-		return
-	}
-	out := make([]jsonVoucher, 0, len(vouchers))
-	for _, v := range vouchers {
-		out = append(out, toJSONVoucher(v))
-	}
-	h.writeJSON(w, http.StatusCreated, map[string]any{
-		"vouchers": out,
-		"count":    len(out),
-	})
-}
-
-// apiVoucherGet returns a single voucher by its code (case insensitive).
-func (h *Handler) apiVoucherGet(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	code := strings.TrimSpace(r.PathValue("code"))
-	if code == "" {
-		h.writeJSONError(w, http.StatusBadRequest, "bad_request",
-			"code is required")
-		return
-	}
-	voucher, err := h.db.Vouchers().GetByCode(ctx, code)
-	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			h.writeJSONError(w, http.StatusNotFound, "not_found",
-				fmt.Sprintf("voucher %q does not exist", code))
-			return
-		}
-		h.writeJSONError(w, http.StatusInternalServerError, "db_error",
-			"failed to load voucher")
-		h.log.Error("api voucher get", "code", code, "error", err)
-		return
-	}
-	h.writeJSON(w, http.StatusOK, toJSONVoucher(voucher))
-}
-
-// apiVoucherRedeem marks a voucher as used.
-func (h *Handler) apiVoucherRedeem(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	code := strings.TrimSpace(r.PathValue("code"))
-	if code == "" {
-		h.writeJSONError(w, http.StatusBadRequest, "bad_request",
-			"code is required")
-		return
-	}
-	voucher, err := h.db.Vouchers().GetByCode(ctx, code)
-	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			h.writeJSONError(w, http.StatusNotFound, "not_found",
-				fmt.Sprintf("voucher %q does not exist", code))
-			return
-		}
-		h.writeJSONError(w, http.StatusInternalServerError, "db_error",
-			"failed to load voucher")
-		h.log.Error("api voucher redeem", "code", code, "error", err)
-		return
-	}
-	redeemed, err := h.db.Vouchers().Redeem(ctx, voucher.ID)
-	if err != nil {
-		h.writeJSONError(w, http.StatusInternalServerError, "db_error",
-			"failed to redeem voucher")
-		h.log.Error("api voucher redeem", "code", code, "error", err)
-		return
-	}
-	if redeemed {
-		h.writeJSON(w, http.StatusOK, map[string]any{
-			"status":  "redeemed",
-			"voucher": toJSONVoucher(voucher),
-		})
-		return
-	}
-	h.writeJSON(w, http.StatusOK, map[string]any{
-		"status":  "already_redeemed",
-		"voucher": toJSONVoucher(voucher),
-	})
-}
-
-// apiVoucherDelete removes a voucher by id.
-func (h *Handler) apiVoucherDelete(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	id, ok := h.voucherIDPath(w, r)
+	_, client, ok := h.apiRouterLookup(w, r)
 	if !ok {
 		return
 	}
-	if err := h.db.Vouchers().Delete(ctx, id); err != nil {
-		h.log.Error("api voucher delete", "id", id, "error", err)
-		if errors.Is(err, database.ErrNotFound) {
-			h.writeJSONError(w, http.StatusNotFound, "not_found",
-				fmt.Sprintf("voucher %d does not exist", id))
+	defer client.Close()
+	reply, err := client.Run(r.Context(), command, req.Args...)
+	if err != nil {
+		h.writeAPIError(w, http.StatusBadGateway, "command_failed",
+			routerErrorHint(err))
+		return
+	}
+	rows := reply.Re
+	if rows == nil {
+		rows = []map[string]string{}
+	}
+	done := reply.Done
+	if done == nil {
+		done = map[string]string{}
+	}
+	h.writeAPIJSON(w, http.StatusOK, map[string]any{
+		"command": command,
+		"rows":    rows,
+		"done":    done,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Vouchers
+// ---------------------------------------------------------------------------
+
+// apiVouchersList returns vouchers, optionally filtered.
+func (h *Handler) apiVouchersList(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	filter := database.VoucherFilter{Query: strings.TrimSpace(q.Get("q"))}
+	if raw := strings.TrimSpace(q.Get("router_id")); raw != "" {
+		if id, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			filter.RouterID = id
+		}
+	}
+	if raw := strings.TrimSpace(q.Get("status")); raw != "" {
+		status := database.VoucherStatus(strings.ToLower(raw))
+		if status.Valid() {
+			filter.Status = status
+		}
+	}
+	filter.Batch = strings.TrimSpace(q.Get("batch"))
+	if raw := strings.TrimSpace(q.Get("limit")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			filter.Limit = n
+		}
+	}
+	if raw := strings.TrimSpace(q.Get("offset")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			filter.Offset = n
+		}
+	}
+	vouchers, err := h.db.Vouchers().List(r.Context(), filter)
+	if err != nil {
+		h.log.Error("api vouchers list", "error", err)
+		h.writeAPIError(w, http.StatusInternalServerError, "db_error",
+			"failed to load vouchers")
+		return
+	}
+	out := make([]apiVoucher, 0, len(vouchers))
+	for _, v := range vouchers {
+		out = append(out, toAPIVoucher(v))
+	}
+	total, err := h.db.Vouchers().Count(r.Context(), filter)
+	if err != nil {
+		total = int64(len(out))
+	}
+	h.writeAPIJSON(w, http.StatusOK, map[string]any{
+		"vouchers": out,
+		"total":    total,
+		"limit":    filter.Limit,
+		"offset":   filter.Offset,
+	})
+}
+
+// apiVoucherCreate generates a batch of voucher keys.
+func (h *Handler) apiVoucherCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RouterID        int64  `json:"router_id"`
+		Count           int    `json:"count"`
+		Batch           string `json:"batch"`
+		Profile         string `json:"profile"`
+		DurationMinutes int    `json:"duration_minutes"`
+		DataLimitMB     int    `json:"data_limit_mb"`
+		DeviceLimit     int    `json:"device_limit"`
+		PriceCents      int64  `json:"price_cents"`
+		MaxUses         int    `json:"max_uses"`
+		Note            string `json:"note"`
+		Prefix          string `json:"prefix"`
+	}
+	if !decodeAPIBody(r, &req) {
+		h.writeAPIError(w, http.StatusBadRequest, "bad_request",
+			"invalid JSON body")
+		return
+	}
+	if req.Count <= 0 {
+		req.Count = 10
+	}
+	if req.Count > maxVoucherBatch {
+		h.writeAPIError(w, http.StatusBadRequest, "validation",
+			fmt.Sprintf("count must be at most %d", maxVoucherBatch))
+		return
+	}
+	if req.RouterID > 0 {
+		if _, err := h.db.Routers().Get(r.Context(), req.RouterID); err != nil {
+			h.writeAPIError(w, http.StatusBadRequest, "validation",
+				fmt.Sprintf("router %d does not exist", req.RouterID))
 			return
 		}
-		h.writeJSONError(w, http.StatusInternalServerError, "db_error",
+	}
+	if req.DeviceLimit <= 0 {
+		req.DeviceLimit = 1
+	}
+	if req.MaxUses <= 0 {
+		req.MaxUses = 1
+	}
+	batch := strings.TrimSpace(req.Batch)
+	if batch == "" {
+		batch = database.VoucherBatchLabel(time.Now())
+	}
+
+	opts := database.DefaultVoucherCodeOptions()
+	opts.Prefix = req.Prefix
+	vouchers := make([]database.Voucher, 0, req.Count)
+	for i := 0; i < req.Count; i++ {
+		var routerID *int64
+		if req.RouterID > 0 {
+			id := req.RouterID
+			routerID = &id
+		}
+		code, err := database.GenerateVoucherCode(opts)
+		if err != nil {
+			h.log.Error("api voucher code", "error", err)
+			h.writeAPIError(w, http.StatusInternalServerError, "code_error",
+				"could not generate a voucher code")
+			return
+		}
+		vouchers = append(vouchers, database.Voucher{
+			Code:            code,
+			Batch:           batch,
+			RouterID:        routerID,
+			Profile:         strings.TrimSpace(req.Profile),
+			DurationMinutes: req.DurationMinutes,
+			DataLimitMB:     req.DataLimitMB,
+			DeviceLimit:     req.DeviceLimit,
+			PriceCents:      req.PriceCents,
+			Status:          database.VoucherUnused,
+			MaxUses:         req.MaxUses,
+			Note:            strings.TrimSpace(req.Note),
+		})
+	}
+	inserted, err := h.db.Vouchers().CreateBatch(r.Context(), vouchers)
+	if err != nil {
+		if errors.Is(err, database.ErrDuplicateVoucherCode) {
+			h.writeAPIError(w, http.StatusConflict, "conflict",
+				"a generated code already exists, retry the request")
+			return
+		}
+		h.log.Error("api voucher create", "error", err)
+		h.writeAPIError(w, http.StatusInternalServerError, "db_error",
+			"failed to create vouchers")
+		return
+	}
+	stored, err := h.db.Vouchers().List(r.Context(), database.VoucherFilter{
+		Batch: batch, Limit: req.Count,
+	})
+	if err != nil {
+		h.writeAPIJSON(w, http.StatusCreated, map[string]any{
+			"count": inserted, "batch": batch,
+		})
+		return
+	}
+	out := make([]apiVoucher, 0, len(stored))
+	for _, v := range stored {
+		out = append(out, toAPIVoucher(v))
+	}
+	h.writeAPIJSON(w, http.StatusCreated, map[string]any{
+		"count":    inserted,
+		"batch":    batch,
+		"vouchers": out,
+	})
+}
+
+// apiVoucherGet looks one voucher up by code.
+func (h *Handler) apiVoucherGet(w http.ResponseWriter, r *http.Request) {
+	voucher, err := h.db.Vouchers().FindByCode(r.Context(), r.PathValue("code"))
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			h.writeAPIError(w, http.StatusNotFound, "not_found",
+				"no voucher with that code")
+			return
+		}
+		h.log.Error("api voucher get", "error", err)
+		h.writeAPIError(w, http.StatusInternalServerError, "db_error",
+			"failed to load voucher")
+		return
+	}
+	h.writeAPIJSON(w, http.StatusOK, toAPIVoucher(voucher))
+}
+
+// apiVoucherDelete removes one voucher from the ledger.
+func (h *Handler) apiVoucherDelete(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		h.writeAPIError(w, http.StatusBadRequest, "invalid_id",
+			"voucher id must be a positive integer")
+		return
+	}
+	if err := h.db.Vouchers().Delete(r.Context(), id); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			h.writeAPIError(w, http.StatusNotFound, "not_found",
+				"no voucher with that id")
+			return
+		}
+		h.log.Error("api voucher delete", "id", id, "error", err)
+		h.writeAPIError(w, http.StatusInternalServerError, "db_error",
 			"failed to delete voucher")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// apiPortalLogin authenticates a hotspot client. It accepts the MikroTik
-// redirect parameters either as JSON or as a standard form POST, so external
-// systems and the captive portal share the same endpoint.
-func (h *Handler) apiPortalLogin(w http.ResponseWriter, r *http.Request) {
+// apiResolveVoucherRouter picks the device a voucher login should hit:
+// the hotspot server-name tag first, then the voucher's bound router, then
+// the default portal device.
+func (h *Handler) apiResolveVoucherRouter(w http.ResponseWriter, r *http.Request, voucher database.Voucher, serverName string) (database.Router, *MikrotikClient, bool) {
 	ctx := r.Context()
-
-	// Prefer a JSON body when present; fall back to form values so the captive
-	// portal can also POST here.
-	var req jsonPortalLoginRequest
-	if r.Header.Get("Content-Type") != "" &&
-		strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			h.writeJSONError(w, http.StatusBadRequest, "bad_request",
-				"request body must be valid JSON")
-			return
-		}
-	} else {
-		req = jsonPortalLoginRequest{
-			MAC:           r.FormValue("mac"),
-			IP:            r.FormValue("ip"),
-			Username:      r.FormValue("username"),
-			Password:      r.FormValue("password"),
-			LinkLogin:     r.FormValue("link_login"),
-			LinkLoginOnly: r.FormValue("link_login_only"),
-			LinkOrig:      r.FormValue("link_orig"),
-			ServerName:    r.FormValue("server_name"),
-			ChapID:        r.FormValue("chap_id"),
-			ChapChallenge: r.FormValue("chap_challenge"),
+	if tag := strings.TrimSpace(serverName); tag != "" {
+		if routers, err := h.db.Routers().FindByPortalTag(ctx, tag); err == nil && len(routers) > 0 {
+			client, err := h.dialRouter(ctx, routers[0])
+			if err != nil {
+				h.writeAPIError(w, http.StatusBadGateway, "router_unreachable",
+					routerErrorHint(err))
+				return routers[0], nil, false
+			}
+			return routers[0], client, true
 		}
 	}
-	if msg := req.validate(); msg != "" {
-		h.writeJSONError(w, http.StatusUnprocessableEntity, "validation_error", msg)
-		return
+	if voucher.RouterID != nil {
+		router, err := h.db.Routers().Get(ctx, *voucher.RouterID)
+		if err != nil {
+			h.writeAPIError(w, http.StatusBadGateway, "router_missing",
+				"the voucher points to a router that no longer exists")
+			return database.Router{}, nil, false
+		}
+		client, err := h.dialRouter(ctx, router)
+		if err != nil {
+			h.writeAPIError(w, http.StatusBadGateway, "router_unreachable",
+				routerErrorHint(err))
+			return router, nil, false
+		}
+		return router, client, true
 	}
-
-	router, err := h.findPortalRouter(ctx, req.ServerName)
+	router, err := h.db.Routers().Default(ctx)
 	if err != nil {
-		h.log.Error("api portal login", "server_name", req.ServerName, "error", err)
-		h.writeJSONError(w, http.StatusBadGateway, "no_router",
-			"no hotspot router is configured for this portal")
-		return
+		h.writeAPIError(w, http.StatusUnprocessableEntity, "no_router",
+			"the voucher is not bound to a hotspot and no default device is set")
+		return database.Router{}, nil, false
 	}
 	client, err := h.dialRouter(ctx, router)
 	if err != nil {
-		h.writeJSONError(w, http.StatusBadGateway, "router_unreachable",
+		h.writeAPIError(w, http.StatusBadGateway, "router_unreachable",
 			routerErrorHint(err))
+		return router, nil, false
+	}
+	return router, client, true
+}
+
+// apiVoucherRedeem provisions a key on its device, logs the client in and
+// consumes one redemption. A device failure never burns the voucher.
+func (h *Handler) apiVoucherRedeem(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MAC        string `json:"mac"`
+		IP         string `json:"ip"`
+		ServerName string `json:"server_name"`
+	}
+	_ = decodeAPIBody(r, &req)
+	voucher, err := h.db.Vouchers().FindByCode(r.Context(), r.PathValue("code"))
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			h.writeAPIError(w, http.StatusNotFound, "not_found",
+				"no voucher with that code")
+			return
+		}
+		h.log.Error("api voucher redeem", "error", err)
+		h.writeAPIError(w, http.StatusInternalServerError, "db_error",
+			"failed to load voucher")
+		return
+	}
+	_, client, ok := h.apiResolveVoucherRouter(w, r, voucher, req.ServerName)
+	if !ok {
 		return
 	}
 	defer client.Close()
-
-	if err := client.HotspotLogin(ctx, req.Username, req.Password,
-		req.MAC, req.IP); err != nil {
-		h.log.Warn("api portal login failed", "username", req.Username,
-			"mac", req.MAC, "ip", req.IP, "error", err)
-		h.writeJSONError(w, http.StatusForbidden, "login_failed",
-			routerErrorHint(err))
+	result, err := h.redeemVoucher(r.Context(), client, voucher, req.MAC, req.IP)
+	if err != nil {
+		if errors.Is(err, database.ErrVoucherNotRedeemable) {
+			h.writeAPIError(w, http.StatusConflict, "not_redeemable", err.Error())
+			return
+		}
+		if strings.Contains(err.Error(), "not assigned to a hotspot") {
+			h.writeAPIError(w, http.StatusUnprocessableEntity, "no_router",
+				err.Error())
+			return
+		}
+		h.writeAPIError(w, http.StatusBadGateway, "redeem_failed", err.Error())
 		return
 	}
-	redirect := req.LinkOrig
-	if redirect == "" {
+	h.writeAPIJSON(w, http.StatusOK, map[string]any{
+		"status":        "redeemed",
+		"login_via_api": result.LoginViaAPI,
+		"created_user":  result.CreatedUser,
+		"note":          result.Note,
+		"voucher":       toAPIVoucher(result.Voucher),
+	})
+}
+
+// apiPortalLogin is the machine endpoint of the captive portal. It accepts the
+// MikroTik redirect parameters plus the voucher code and returns where the
+// client should be sent next.
+func (h *Handler) apiPortalLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Code       string `json:"code"`
+		MAC        string `json:"mac"`
+		IP         string `json:"ip"`
+		LinkLogin  string `json:"link_login"`
+		LinkOrig   string `json:"link_orig"`
+		ServerName string `json:"server_name"`
+	}
+	if !decodeAPIBody(r, &req) {
+		h.writeAPIError(w, http.StatusBadRequest, "bad_request",
+			"invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(req.Code) == "" {
+		h.writeAPIError(w, http.StatusBadRequest, "validation",
+			"code is required")
+		return
+	}
+	voucher, err := h.db.Vouchers().FindByCode(r.Context(), req.Code)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			h.writeAPIError(w, http.StatusUnauthorized, "invalid_code",
+				"unknown voucher code")
+			return
+		}
+		h.log.Error("api portal login", "error", err)
+		h.writeAPIError(w, http.StatusInternalServerError, "db_error",
+			"failed to load voucher")
+		return
+	}
+	_, client, ok := h.apiResolveVoucherRouter(w, r, voucher, req.ServerName)
+	if !ok {
+		return
+	}
+	defer client.Close()
+	result, err := h.redeemVoucher(r.Context(), client, voucher, req.MAC, req.IP)
+	if err != nil {
+		if errors.Is(err, database.ErrVoucherNotRedeemable) {
+			h.writeAPIError(w, http.StatusConflict, "not_redeemable", err.Error())
+			return
+		}
+		if strings.Contains(err.Error(), "not assigned to a hotspot") {
+			h.writeAPIError(w, http.StatusUnprocessableEntity, "no_router",
+				err.Error())
+			return
+		}
+		h.writeAPIError(w, http.StatusBadGateway, "redeem_failed", err.Error())
+		return
+	}
+	redirect := strings.TrimSpace(req.LinkOrig)
+	if redirect == "" || !isSafeRedirect(redirect) {
 		redirect = h.cfg.DefaultRedirect
 	}
-	h.writeJSON(w, http.StatusOK, map[string]any{
-		"status":          "ok",
-		"redirect":        redirect,
-		"link_login":      req.LinkLogin,
-		"link_login_only": req.LinkLoginOnly,
+	h.writeAPIJSON(w, http.StatusOK, map[string]any{
+		"status":        "authenticated",
+		"login_via_api": result.LoginViaAPI,
+		"note":          result.Note,
+		"voucher":       toAPIVoucher(result.Voucher),
+		"redirect":      redirect,
 	})
+}
+
+// isSafeRedirect only follows http(s) targets back to the client.
+func isSafeRedirect(target string) bool {
+	return strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://")
 }

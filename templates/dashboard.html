@@ -5,6 +5,58 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} · {{.PortalName}}</title>
 {{template "styles" .}}
+<style>
+/* Interface traffic graph styles */
+.interface-graph-card{
+  margin-top:16px;
+}
+.interface-selector{
+  display:flex; flex-wrap:wrap; gap:8px; align-items:center;
+}
+.interface-selector select{
+  padding:8px 12px; border-radius:8px; border:1px solid var(--line);
+  background:var(--panel); color:var(--text); font-size:.85rem;
+  min-width:200px;
+}
+.interface-selector .btn{flex-shrink:0}
+.interface-info{
+  display:flex; gap:16px; flex-wrap:wrap; margin-top:12px;
+  font-size:.85rem; color:var(--muted);
+}
+.interface-info .stat{
+  display:flex; flex-direction:column; gap:2px;
+}
+.interface-info .stat .value{
+  font-size:1rem; font-weight:600; color:var(--text);
+}
+canvas#trafficCanvas{
+  width:100%; height:200px; border-radius:10px;
+  background:var(--panel); border:1px solid var(--line);
+  margin-top:12px; display:block;
+}
+.traffic-legend{
+  display:flex; gap:16px; justify-content:center; margin-top:8px;
+  font-size:.8rem; color:var(--muted);
+}
+.traffic-legend .dot{
+  width:10px; height:10px; border-radius:50%; display:inline-block;
+}
+.traffic-legend .dot.rx{background:var(--accent)}
+.traffic-legend .dot.tx{background:var(--accent-2)}
+.no-interface{
+  text-align:center; padding:40px; color:var(--muted);
+}
+.no-interface p{margin:8px 0}
+.loading-graph{
+  text-align:center; padding:40px; color:var(--muted);
+}
+.loading-graph .spinner{
+  width:30px; height:30px; border:3px solid var(--line);
+  border-top-color:var(--accent); border-radius:50%;
+  animation:spin .8s linear infinite; margin:0 auto 12px;
+}
+@keyframes spin{100%{transform:rotate(360deg)}}
+</style>
 </head>
 <body>
 {{template "nav" .}}
@@ -42,6 +94,78 @@
       <span class="label">Redeemed value</span>
       <span class="value">{{money .Stats.Vouchers.BilledCents}}</span>
       <span class="meta">of {{money .Stats.Vouchers.FaceValueCents}} issued · {{.Stats.Vouchers.Pushed}} provisioned on devices</span>
+    </div>
+  </section>
+
+  <!-- Interface Traffic Graph -->
+  <section class="card interface-graph-card">
+    <h2>Interface traffic monitor</h2>
+    <p class="hint">Select a router and interface to view real-time traffic statistics.</p>
+
+    <div class="interface-selector">
+      <select id="routerSelect">
+        <option value="">— Select a router —</option>
+        {{range .Routers}}
+        <option value="{{.Router.ID}}">{{.Router.Name}} ({{.Router.Endpoint}})</option>
+        {{end}}
+      </select>
+      <select id="interfaceSelect" disabled>
+        <option value="">— Select an interface —</option>
+      </select>
+      <button class="btn" id="refreshTrafficBtn" disabled>Refresh now</button>
+      <span id="graphStatus" class="muted" style="font-size:.8rem"></span>
+    </div>
+
+    <div id="interfaceInfo" class="interface-info" style="display:none">
+      <div class="stat">
+        <span class="label">Interface</span>
+        <span class="value" id="ifaceName">—</span>
+      </div>
+      <div class="stat">
+        <span class="label">Type</span>
+        <span class="value" id="ifaceType">—</span>
+      </div>
+      <div class="stat">
+        <span class="label">MAC</span>
+        <span class="value mono" id="ifaceMAC">—</span>
+      </div>
+      <div class="stat">
+        <span class="label">MTU</span>
+        <span class="value" id="ifaceMTU">—</span>
+      </div>
+      <div class="stat">
+        <span class="label">RX (total)</span>
+        <span class="value" id="ifaceRx">—</span>
+      </div>
+      <div class="stat">
+        <span class="label">TX (total)</span>
+        <span class="value" id="ifaceTx">—</span>
+      </div>
+      <div class="stat">
+        <span class="label">RX rate</span>
+        <span class="value" id="ifaceRxRate">—</span>
+      </div>
+      <div class="stat">
+        <span class="label">TX rate</span>
+        <span class="value" id="ifaceTxRate">—</span>
+      </div>
+    </div>
+
+    <div id="graphContainer" style="display:none">
+      <canvas id="trafficCanvas"></canvas>
+      <div class="traffic-legend">
+        <span><span class="dot rx"></span> RX (receive)</span>
+        <span><span class="dot tx"></span> TX (transmit)</span>
+        <span id="graphTimeRange" style="margin-left:auto"></span>
+      </div>
+    </div>
+    <div id="noInterface" class="no-interface">
+      <p>No interface selected. Choose a router and interface above to begin monitoring.</p>
+      <p>Traffic data updates every 2 seconds. The graph shows the last 60 data points (2 minutes).</p>
+    </div>
+    <div id="loadingGraph" class="loading-graph" style="display:none">
+      <div class="spinner"></div>
+      <p>Loading traffic data...</p>
     </div>
   </section>
 
@@ -126,5 +250,408 @@
   </section>
 </main>
 {{template "footer" .}}
+<script>
+(function(){
+  'use strict';
+  const routerSelect = document.getElementById('routerSelect');
+  const interfaceSelect = document.getElementById('interfaceSelect');
+  const refreshBtn = document.getElementById('refreshTrafficBtn');
+  const graphStatus = document.getElementById('graphStatus');
+  const interfaceInfo = document.getElementById('interfaceInfo');
+  const graphContainer = document.getElementById('graphContainer');
+  const noInterface = document.getElementById('noInterface');
+  const loadingGraph = document.getElementById('loadingGraph');
+  const canvas = document.getElementById('trafficCanvas');
+  const ctx = canvas.getContext('2d');
+  const graphTimeRange = document.getElementById('graphTimeRange');
+
+  let currentRouterId = null;
+  let currentInterfaceId = null;
+  let trafficData = [];
+  let pollingInterval = null;
+
+  function resizeCanvas(){
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+  }
+
+  function formatBytes(bytes){
+    if(bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const k = 1024;
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const val = bytes / Math.pow(k, i);
+    return val.toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+  }
+
+  function drawGraph(){
+    if(!canvas || !ctx) return;
+    const rect = canvas.getBoundingClientRect();
+    const width = rect.width;
+    const height = rect.height;
+    const padding = {top: 20, right: 20, bottom: 30, left: 50};
+    const graphWidth = width - padding.left - padding.right;
+    const graphHeight = height - padding.top - padding.bottom;
+    ctx.clearRect(0, 0, width, height);
+    if(trafficData.length < 2){
+      ctx.fillStyle = '#8fa3c4';
+      ctx.font = '13px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Waiting for data...', width/2, height/2);
+      return;
+    }
+    let maxRx = 0, maxTx = 0;
+    for(const p of trafficData){
+      if(p.rxBytes > maxRx) maxRx = p.rxBytes;
+      if(p.txBytes > maxTx) maxTx = p.txBytes;
+    }
+    const maxVal = Math.max(maxRx, maxTx, 1);
+    const xScale = graphWidth / Math.max(trafficData.length - 1, 1);
+    const yScale = graphHeight / maxVal;
+    ctx.strokeStyle = '#22304d';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    for(let i = 0; i <= 4; i++){
+      const y = padding.top + (graphHeight * i / 4);
+      ctx.beginPath();
+      ctx.moveTo(padding.left, y);
+      ctx.lineTo(width - padding.right, y);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#8fa3c4';
+    ctx.font = '11px ui-monospace, monospace';
+    ctx.textAlign = 'right';
+    for(let i = 0; i <= 4; i++){
+      const y = padding.top + (graphHeight * i / 4);
+      const val = Math.round(maxVal * (1 - i/4));
+      ctx.fillText(formatBytes(val), padding.left - 8, y + 4);
+    }
+    const timeRange = trafficData.length > 1 ?
+      (trafficData[trafficData.length-1].timestamp - trafficData[0].timestamp) / 1000 : 0;
+    graphTimeRange.textContent = timeRange > 0 ? 'Last ' + timeRange.toFixed(0) + 's' : '';
+    if(trafficData.length > 1){
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for(let i = 0; i < trafficData.length; i++){
+        const x = padding.left + (i * xScale);
+        const y = padding.top + graphHeight - (trafficData[i].rxBytes * yScale);
+        if(i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.strokeStyle = '#22d3ee';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for(let i = 0; i < trafficData.length; i++){
+        const x = padding.left + (i * xScale);
+        const y = padding.top + graphHeight - (trafficData[i].txBytes * yScale);
+        if(i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.1)';
+      ctx.beginPath();
+      ctx.moveTo(padding.left, padding.top + graphHeight);
+      for(let i = 0; i < trafficData.length; i++){
+        const x = padding.left + (i * xScale);
+        const y = padding.top + graphHeight - (trafficData[i].rxBytes * yScale);
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(padding.left + ((trafficData.length-1) * xScale), padding.top + graphHeight);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(34, 211, 238, 0.1)';
+      ctx.beginPath();
+      ctx.moveTo(padding.left, padding.top + graphHeight);
+      for(let i = 0; i < trafficData.length; i++){
+        const x = padding.left + (i * xScale);
+        const y = padding.top + graphHeight - (trafficData[i].txBytes * yScale);
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(padding.left + ((trafficData.length-1) * xScale), padding.top + graphHeight);
+      ctx.closePath();
+      ctx.fill();
+      const last = trafficData[trafficData.length - 1];
+      ctx.font = 'bold 12px ui-monospace, monospace';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillText('RX: ' + formatBytes(last.rxBytes), padding.left + 5, padding.top - 5);
+      ctx.fillStyle = '#22d3ee';
+      ctx.fillText('TX: ' + formatBytes(last.txBytes), padding.left + 5, padding.top + 10);
+    }
+  }
+
+  routerSelect.addEventListener('change', function(){
+    currentRouterId = this.value;
+    currentInterfaceId = null;
+    trafficData = [];
+    loadInterfaces(currentRouterId);
+  });
+
+  interfaceSelect.addEventListener('change', function(){
+    currentInterfaceId = this.value;
+    if(currentInterfaceId){
+      loadTrafficData(currentRouterId, currentInterfaceId);
+      if(pollingInterval) clearInterval(pollingInterval);
+      pollingInterval = setInterval(function(){
+        loadTrafficData(currentRouterId, currentInterfaceId);
+      }, 2000);
+    }else{
+      if(pollingInterval) clearInterval(pollingInterval);
+      pollingInterval = null;
+      graphContainer.style.display = 'none';
+      interfaceInfo.style.display = 'none';
+      noInterface.style.display = 'block';
+    }
+  });
+
+  refreshBtn.addEventListener('click', function(){
+    if(currentRouterId && currentInterfaceId){
+      loadTrafficData(currentRouterId, currentInterfaceId);
+    }
+  });
+
+  window.addEventListener('resize', function(){
+    if(graphContainer.style.display !== 'none'){
+      resizeCanvas();
+      drawGraph();
+    }
+  });
+
+  setTimeout(resizeCanvas, 100);
+})();
+</script>    if(!routerId || !interfaceId) return;
+    loadingGraph.style.display = 'block';
+    graphContainer.style.display = 'none';
+    try{
+      const resp = await fetch('/api/v1/routers/' + routerId + '/interfaces/' + interfaceId + '/traffic');
+      if(!resp.ok) throw new Error('Failed to load traffic data');
+      const data = await resp.json();
+      trafficData = data.points.map(p => ({
+        timestamp: new Date(p.timestamp).getTime(),
+        rxBytes: p.rx_bytes,
+        txBytes: p.tx_bytes,
+        rxRate: p.rx_rate,
+        txRate: p.tx_rate
+      }));
+      document.getElementById('ifaceName').textContent = data.interface_name;
+      document.getElementById('ifaceType').textContent = '—';
+      document.getElementById('ifaceMAC').textContent = '—';
+      document.getElementById('ifaceMTU').textContent = '—';
+      document.getElementById('ifaceRx').textContent = formatBytes(trafficData[trafficData.length-1].rxBytes);
+      document.getElementById('ifaceTx').textContent = formatBytes(trafficData[trafficData.length-1].txBytes);
+      document.getElementById('ifaceRxRate').textContent = formatRate(trafficData[trafficData.length-1].rxRate);
+      document.getElementById('ifaceTxRate').textContent = formatRate(trafficData[trafficData.length-1].txRate);
+      interfaceInfo.style.display = 'flex';
+      graphContainer.style.display = 'block';
+      noInterface.style.display = 'none';
+      loadingGraph.style.display = 'none';
+      resizeCanvas();
+      drawGraph();
+      graphStatus.textContent = 'Live • ' + trafficData.length + ' points';
+    }catch(err){
+      loadingGraph.style.display = 'none';
+      graphStatus.textContent = 'Error: ' + err.message;
+    }
+  }
+    const width = rect.width;
+    const height = rect.height;
+    const padding = {top: 20, right: 20, bottom: 30, left: 50};
+    const graphWidth = width - padding.left - padding.right;
+    const graphHeight = height - padding.top - padding.bottom;
+    ctx.clearRect(0, 0, width, height);
+    if(trafficData.length < 2){
+      ctx.fillStyle = '#8fa3c4';
+      ctx.font = '13px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Waiting for data...', width/2, height/2);
+      return;
+    }
+    let maxRx = 0, maxTx = 0;
+    for(const p of trafficData){
+      if(p.rxBytes > maxRx) maxRx = p.rxBytes;
+      if(p.txBytes > maxTx) maxTx = p.txBytes;
+    }
+    const maxVal = Math.max(maxRx, maxTx, 1);
+    const xScale = graphWidth / Math.max(trafficData.length - 1, 1);
+    const yScale = graphHeight / maxVal;
+    ctx.strokeStyle = '#22304d';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    for(let i = 0; i <= 4; i++){
+      const y = padding.top + (graphHeight * i / 4);
+      ctx.beginPath();
+      ctx.moveTo(padding.left, y);
+      ctx.lineTo(width - padding.right, y);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#8fa3c4';
+    ctx.font = '11px ui-monospace, monospace';
+    ctx.textAlign = 'right';
+    for(let i = 0; i <= 4; i++){
+      const y = padding.top + (graphHeight * i / 4);
+      const val = Math.round(maxVal * (1 - i/4));
+      ctx.fillText(formatBytes(val), padding.left - 8, y + 4);
+    }
+    const timeRange = trafficData.length > 1 ?
+      (trafficData[trafficData.length-1].timestamp - trafficData[0].timestamp) / 1000 : 0;
+    graphTimeRange.textContent = timeRange > 0 ? 'Last ' + timeRange.toFixed(0) + 's' : '';
+    if(trafficData.length > 1){
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for(let i = 0; i < trafficData.length; i++){
+        const x = padding.left + (i * xScale);
+        const y = padding.top + graphHeight - (trafficData[i].rxBytes * yScale);
+        if(i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.strokeStyle = '#22d3ee';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for(let i = 0; i < trafficData.length; i++){
+        const x = padding.left + (i * xScale);
+        const y = padding.top + graphHeight - (trafficData[i].txBytes * yScale);
+        if(i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.1)';
+      ctx.beginPath();
+      ctx.moveTo(padding.left, padding.top + graphHeight);
+      for(let i = 0; i < trafficData.length; i++){
+        const x = padding.left + (i * xScale);
+        const y = padding.top + graphHeight - (trafficData[i].rxBytes * yScale);
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(padding.left + ((trafficData.length-1) * xScale), padding.top + graphHeight);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(34, 211, 238, 0.1)';
+      ctx.beginPath();
+      ctx.moveTo(padding.left, padding.top + graphHeight);
+      for(let i = 0; i < trafficData.length; i++){
+        const x = padding.left + (i * xScale);
+        const y = padding.top + graphHeight - (trafficData[i].txBytes * yScale);
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(padding.left + ((trafficData.length-1) * xScale), padding.top + graphHeight);
+      ctx.closePath();
+      ctx.fill();
+      const last = trafficData[trafficData.length - 1];
+      ctx.font = 'bold 12px ui-monospace, monospace';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillText('RX: ' + formatBytes(last.rxBytes), padding.left + 5, padding.top - 5);
+      ctx.fillStyle = '#22d3ee';
+      ctx.fillText('TX: ' + formatBytes(last.txBytes), padding.left + 5, padding.top + 10);
+    }
+  }
+
+  async function loadInterfaces(routerId){
+    if(!routerId){
+      interfaceSelect.innerHTML = '<option value="">— Select an interface —</option>';
+      interfaceSelect.disabled = true;
+      refreshBtn.disabled = true;
+      graphContainer.style.display = 'none';
+      interfaceInfo.style.display = 'none';
+      noInterface.style.display = 'block';
+      return;
+    }
+    interfaceSelect.innerHTML = '<option value="">Loading...</option>';
+    interfaceSelect.disabled = true;
+    try{
+      const resp = await fetch('/api/v1/routers/' + routerId + '/interfaces');
+      if(!resp.ok) throw new Error('Failed to load interfaces');
+      const data = await resp.json();
+      interfaceSelect.innerHTML = '<option value="">— Select an interface —</option>';
+      for(const iface of data.interfaces){
+        interfaceSelect.innerHTML += '<option value="' + iface.id + '">' + iface.name + ' (' + iface.type + ')</option>';
+      }
+      interfaceSelect.disabled = false;
+      refreshBtn.disabled = false;
+    }catch(err){
+      interfaceSelect.innerHTML = '<option value="">Error loading interfaces</option>';
+      graphStatus.textContent = 'Error: ' + err.message;
+    }
+  }
+  async function loadTrafficData(routerId, interfaceId){
+    if(!routerId || !interfaceId) return;
+    loadingGraph.style.display = 'block';
+    graphContainer.style.display = 'none';
+    try{
+      const resp = await fetch('/api/v1/routers/' + routerId + '/interfaces/' + interfaceId + '/traffic');
+      if(!resp.ok) throw new Error('Failed to load traffic data');
+      const data = await resp.json();
+      trafficData = data.points.map(p => ({
+        timestamp: new Date(p.timestamp).getTime(),
+        rxBytes: p.rx_bytes,
+        txBytes: p.tx_bytes,
+        rxRate: p.rx_rate,
+        txRate: p.tx_rate
+      }));
+      document.getElementById('ifaceName').textContent = data.interface_name;
+      document.getElementById('ifaceType').textContent = '—';
+      document.getElementById('ifaceMAC').textContent = '—';
+      document.getElementById('ifaceMTU').textContent = '—';
+      document.getElementById('ifaceRx').textContent = formatBytes(trafficData[trafficData.length-1].rxBytes);
+      document.getElementById('ifaceTx').textContent = formatBytes(trafficData[trafficData.length-1].txBytes);
+      document.getElementById('ifaceRxRate').textContent = formatRate(trafficData[trafficData.length-1].rxRate);
+      document.getElementById('ifaceTxRate').textContent = formatRate(trafficData[trafficData.length-1].txRate);
+      interfaceInfo.style.display = 'flex';
+      graphContainer.style.display = 'block';
+      noInterface.style.display = 'none';
+      loadingGraph.style.display = 'none';
+      resizeCanvas();
+      drawGraph();
+      graphStatus.textContent = 'Live • ' + trafficData.length + ' points';
+    }catch(err){
+      loadingGraph.style.display = 'none';
+      graphStatus.textContent = 'Error: ' + err.message;
+    }
+  }
+  routerSelect.addEventListener('change', function(){
+    currentRouterId = this.value;
+    currentInterfaceId = null;
+    trafficData = [];
+    loadInterfaces(currentRouterId);
+  });
+  interfaceSelect.addEventListener('change', function(){
+    currentInterfaceId = this.value;
+    if(currentInterfaceId){
+      loadTrafficData(currentRouterId, currentInterfaceId);
+      if(pollingInterval) clearInterval(pollingInterval);
+      pollingInterval = setInterval(function(){
+        loadTrafficData(currentRouterId, currentInterfaceId);
+      }, 2000);
+    }else{
+      if(pollingInterval) clearInterval(pollingInterval);
+      pollingInterval = null;
+      graphContainer.style.display = 'none';
+      interfaceInfo.style.display = 'none';
+      noInterface.style.display = 'block';
+    }
+  });
+  refreshBtn.addEventListener('click', function(){
+    if(currentRouterId && currentInterfaceId){
+      loadTrafficData(currentRouterId, currentInterfaceId);
+    }
+  });
+  window.addEventListener('resize', function(){
+    if(graphContainer.style.display !== 'none'){
+      resizeCanvas();
+      drawGraph();
+    }
+  });
+  setTimeout(resizeCanvas, 100);
+})();
+</script>
 </body>
 </html>
