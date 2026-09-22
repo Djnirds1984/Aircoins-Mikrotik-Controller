@@ -93,6 +93,9 @@ td.num,th.num{text-align:right}
 .field.check{flex-direction:row; align-items:center; gap:8px}
 .field.check input{width:auto}
 .field.check label{color:var(--text)}
+.check-row{display:flex; gap:8px 16px; flex-wrap:wrap; align-items:center; margin-top:6px}
+.check-row label.check{display:inline-flex; gap:7px; align-items:center; font-size:.86rem; color:var(--text)}
+.check-row label.check input{width:auto}
 .alert{padding:11px 14px; border-radius:12px; margin:0 0 16px; border:1px solid; font-size:.9rem}
 .alert.ok{background:rgba(52,211,153,.1); border-color:rgba(52,211,153,.4); color:#a7f3d0}
 .alert.warn{background:rgba(251,191,36,.1); border-color:rgba(251,191,36,.4); color:#fde68a}
@@ -137,6 +140,7 @@ details.editor[open] summary{margin-bottom:12px}
   <nav class="nav">
     <a href="/"{{if eq .Nav "dashboard"}} class="active"{{end}}>Dashboard</a>
     <a href="/routers"{{if eq .Nav "routers"}} class="active"{{end}}>Routers</a>
+    <a href="/network"{{if eq .Nav "network"}} class="active"{{end}}>Network</a>
     <a href="/vouchers"{{if eq .Nav "vouchers"}} class="active"{{end}}>Vouchers</a>
     <a href="/sessions"{{if eq .Nav "sessions"}} class="active"{{end}}>Sessions</a>
   </nav>

@@ -782,7 +782,9 @@ func (c *MikrotikClient) UnblockBinding(ctx context.Context, id string) error {
 	return err
 }
 
-// HotspotProfile is one entry of /ip/hotspot/user/profile/print.
+// HotspotProfile is one entry of /ip/hotspot/user/profile/print. These are the
+// per user settings a voucher maps onto: how many devices one login may use,
+// the speed and volume it gets and which scripts run around it.
 type HotspotProfile struct {
 	ID          string
 	Name        string
@@ -791,7 +793,41 @@ type HotspotProfile struct {
 	SessionTime string
 	IdleTimeout string
 	Keepalive   string
+
+	AddressPool       string
+	StatusAutorefresh string
+	AddMACCookie      bool
+	MACCookieTimeout  string
+	AddressList       string
+	IncomingFilter    string
+	OutgoingFilter    string
+	IncomingPktMark   string
+	OutgoingPktMark   string
+	QueueType         string
+	ParentQueue       string
+	InsertQueueBefore string
+	OnLogin           string
+	OnLogout          string
+	TransparentProxy  bool
+	OpenStatusPage    string
+	Advertise         bool
+	AdvertiseURL      string
+	AdvertiseInterval string
+	AdvertiseTimeout  string
+	// IsDefault marks the built in profile new users fall back to.
+	IsDefault bool
 }
+
+// SharedUsersLabel renders the concurrent device allowance for the UI.
+func (p HotspotProfile) SharedUsersLabel() string {
+	if p.SharedUsers <= 0 {
+		return "unlimited"
+	}
+	return strconv.Itoa(p.SharedUsers)
+}
+
+// AdvertisedURLs splits the comma separated advertise-url list.
+func (p HotspotProfile) AdvertisedURLs() []string { return splitROSList(p.AdvertiseURL) }
 
 // HotspotProfiles lists the hotspot user profiles of a device.
 func (c *MikrotikClient) HotspotProfiles(ctx context.Context) ([]HotspotProfile, error) {
@@ -801,15 +837,7 @@ func (c *MikrotikClient) HotspotProfiles(ctx context.Context) ([]HotspotProfile,
 	}
 	profiles := make([]HotspotProfile, 0, len(reply.Re))
 	for _, row := range reply.Re {
-		profiles = append(profiles, HotspotProfile{
-			ID:          row[".id"],
-			Name:        row["name"],
-			SharedUsers: int(parseInt64(row["shared-users"])),
-			RateLimit:   row["rate-limit"],
-			SessionTime: row["session-timeout"],
-			IdleTimeout: row["idle-timeout"],
-			Keepalive:   row["keepalive-timeout"],
-		})
+		profiles = append(profiles, hotspotProfileFromRow(row))
 	}
 	return profiles, nil
 }

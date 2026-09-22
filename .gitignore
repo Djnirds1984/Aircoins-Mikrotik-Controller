@@ -1,6 +1,9 @@
 # Build artifacts
 /bin/
 /dist/
+*.exe
+*.exe~
+
 
 # Runtime state: the database and the generated master key must never be
 # committed.

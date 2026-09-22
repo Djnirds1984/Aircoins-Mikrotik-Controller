@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Network · {{if .Router.ID}}{{.Router.Name}} · {{end}}{{.PortalName}}</title>
+{{template "styles" .}}
+</head>
+<body>
+{{template "nav" .}}
+<main class="wrap">
+  {{template "flash" .}}
+
+{{if not .Router.ID}}
+  <div class="page-head">
+    <div>
+      <h1>Network</h1>
+      <p class="sub">Hotspot servers, server profiles, user profiles and walled garden rules, read live from a device.</p>
+    </div>
+  </div>
+  <section class="card">
+    <h2>Choose a device</h2>
+    {{if .Routers}}
+    <p class="hint">The Network tab configures one router at a time, because every hotspot menu belongs to a single device.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Router</th><th>Endpoint</th><th>Portal tag</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          {{range .Routers}}
+          <tr>
+            <td><strong>{{.Name}}</strong>
+              {{if .Location}}<div class="muted" style="font-size:.78rem">{{.Location}}</div>{{end}}
+            </td>
+            <td class="mono">{{.Endpoint}}</td>
+            <td>{{if .PortalTag}}<span class="badge blue">{{.PortalTag}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+            <td><span class="{{statusClass .LastStatus}}">{{.LastStatus}}</span></td>
+            <td class="num nowrap">
+              <a class="btn small" href="/network?router={{.ID}}">Open network</a>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty">No routers registered yet. <a href="/routers">Add a MikroTik device</a> first, then come back to configure its hotspot.</div>
+    {{end}}
+  </section>
+{{else}}
+  <div class="page-head">
+    <div>
+      <h1>Network · {{.Router.Name}}</h1>
+      <p class="sub">
+        <span class="mono">{{.Router.Endpoint}}</span> ·
+        hotspot configuration read live from the device
+      </p>
+    </div>
+    <div class="actions">
+      <a class="btn" href="/network">All devices</a>
+      <a class="btn" href="/routers/{{.Router.ID}}">Device manager</a>
+    </div>
+  </div>
+
+  {{if not .Live}}
+  <div class="alert warn">
+    <strong>{{.Router.Name}} is not answering the API.</strong> {{.LiveHint}}
+    <div class="muted" style="font-size:.82rem; margin-top:4px">Device reported: {{.LiveError}}</div>
+  </div>
+  {{end}}
+
+  {{if .Warnings}}
+  <div class="alert warn">
+    <strong>Some menus could not be read.</strong>
+    <ul class="notice-list">{{range .Warnings}}<li>{{.}}</li>{{end}}</ul>
+  </div>
+  {{end}}
+
+  <div class="pill-row">
+    {{range .Tabs}}
+    <a href="/network/{{$.Router.ID}}?tab={{.}}"{{if eq . $.Tab}} class="active"{{end}}>{{.Label}} <span class="badge slate">{{$.CountFor .}}</span></a>
+    {{end}}
+  </div>
+  <p class="hint muted">{{.Tab.Hint}}</p>
+
+{{if eq .Tab "servers"}}
+  <section class="card">
+    <h2>Hotspot servers <span class="badge slate">{{len .Servers}}</span></h2>
+    <p class="hint">/ip/hotspot — every server binds one or more interfaces and decides how the clients on them sign in.</p>
+    {{if .Servers}}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th><th>Interfaces</th><th>Address pool</th><th>Profile</th>
+            <th>idle / keepalive / login</th><th class="num">MACs</th><th>State</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+        {{range .Servers}}
+          <tr>
+            <td><strong>{{.Name}}</strong>
+              {{if .Comment}}<div class="muted" style="font-size:.76rem">{{.Comment}}</div>{{end}}
+              {{if .IPOfDNSName}}<div class="muted mono" style="font-size:.72rem">dns {{.IPOfDNSName}}</div>{{end}}
+            </td>
+            <td>{{range $i, $iface := .Interfaces}}{{if $i}} {{end}}<span class="badge slate">{{$iface}}</span>{{end}}</td>
+            <td>{{default .AddressPool "none"}}</td>
+            <td>{{if .Profile}}<span class="badge blue">{{.Profile}}</span>{{else}}<span class="muted">default</span>{{end}}</td>
+            <td class="mono" style="font-size:.8rem">{{default .IdleTimeout "—"}} / {{default .KeepaliveTimeout "—"}} / {{default .LoginTimeout "—"}}</td>
+            <td class="num">{{default .AddressesPerMAC "1"}}</td>
+            <td>
+              {{if .Disabled}}<span class="badge slate">disabled</span>{{else}}<span class="badge green">enabled</span>{{end}}
+              {{if .ProxyStatus}}<div class="muted" style="font-size:.72rem">proxy {{.ProxyStatus}}</div>{{end}}
+            </td>
+            <td class="num nowrap">
+              <a class="btn small" href="/network/{{$.Router.ID}}?tab=servers&edit={{.ID}}">Edit</a>
+              <form class="inline-form" method="post" action="/network/{{$.Router.ID}}/servers/{{.ID}}/toggle">
+                {{template "csrf" $}}
+                <input type="hidden" name="disabled" value="{{if .Disabled}}0{{else}}1{{end}}">
+                <button class="btn small" type="submit">{{if .Disabled}}Enable{{else}}Disable{{end}}</button>
+              </form>
+              <form class="inline-form" method="post" action="/network/{{$.Router.ID}}/servers/{{.ID}}/delete">
+                {{template "csrf" $}}
+                <button class="btn small danger" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty">No hotspot server on this device yet.</div>
+    {{end}}
+  </section>
+  <section class="card" style="margin-top:16px">
+    {{$form := .ServerForm}}
+    <details class="editor"{{if .Editing}} open{{end}}>
+      <summary>{{if .Editing}}Edit hotspot server <span class="mono">{{.Editing}}</span>{{else}}Add a hotspot server{{end}}</summary>
+      <form method="post" action="/network/{{$.Router.ID}}/servers{{if $.Editing}}/{{$.Editing}}{{end}}">
+        {{template "csrf" $}}
+        <div class="form-grid">
+          <div class="field">
+            <label for="srv-name">Name</label>
+            <input id="srv-name" name="name" value="{{$form.Name}}" maxlength="200" placeholder="hotspot1">
+            {{with $form.Errors.name}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="srv-iface">Interface(s)</label>
+            <input id="srv-iface" name="interface" value="{{$form.Interface}}" list="iface-options" placeholder="bridge-hotspot">
+            {{with $form.Errors.interface}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="srv-pool">Address pool</label>
+            <input id="srv-pool" name="address_pool" value="{{$form.AddressPool}}" list="pool-options">
+          </div>
+          <div class="field">
+            <label for="srv-profile">Server profile</label>
+            <select id="srv-profile" name="profile">
+              <option value="">(device default)</option>
+              {{$selected := $form.Profile}}
+              {{range $.ServerProfileNames}}
+              <option value="{{.}}"{{if eq . $selected}} selected{{end}}>{{.}}</option>
+              {{end}}
+            </select>
+          </div>
+          <div class="field">
+            <label for="srv-idle">Idle timeout</label>
+            <input id="srv-idle" name="idle_timeout" value="{{$form.IdleTimeout}}" placeholder="10m">
+            {{with $form.Errors.idle_timeout}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="srv-keep">Keepalive timeout</label>
+            <input id="srv-keep" name="keepalive_timeout" value="{{$form.KeepaliveTimeout}}" placeholder="2m">
+            {{with $form.Errors.keepalive_timeout}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="srv-login">Login timeout</label>
+            <input id="srv-login" name="login_timeout" value="{{$form.LoginTimeout}}" placeholder="1d">
+            {{with $form.Errors.login_timeout}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="srv-macs">Addresses per MAC</label>
+            <input id="srv-macs" name="addresses_per_mac" value="{{$form.AddressesPerMAC}}" placeholder="1">
+            {{with $form.Errors.addresses_per_mac}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="srv-comment">Comment</label>
+            <input id="srv-comment" name="comment" value="{{$form.Comment}}" maxlength="200">
+          </div>
+          <div class="field check">
+            <input id="srv-disabled" type="checkbox" name="disabled" value="1"{{if $form.Disabled}} checked{{end}}>
+            <label for="srv-disabled">Disabled</label>
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn primary" type="submit">{{if .Editing}}Save server{{else}}Create server{{end}}</button>
+          {{if .Editing}}<a class="btn" href="/network/{{.Router.ID}}?tab=servers">Cancel</a>{{end}}
+        </div>
+      </form>
+    </details>
+  </section>
+  <datalist id="iface-options">{{range .Interfaces}}<option value="{{.Name}}"></option>{{end}}</datalist>
+  <datalist id="pool-options">{{range .Pools}}<option value="{{.}}"></option>{{end}}</datalist>
+{{else if eq .Tab "server-profiles"}}
+  <section class="card">
+    <h2>Server profiles <span class="badge slate">{{len .ServerProfiles}}</span></h2>
+    <p class="hint">/ip/hotspot/profile — the address, DNS name and login methods every hotspot server using this profile advertises to its clients.</p>
+    {{if .ServerProfiles}}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th><th>Hotspot address</th><th>DNS name</th><th>Login by</th>
+            <th>Rate limit</th><th>RADIUS</th><th>State</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+        {{range .ServerProfiles}}
+          <tr>
+            <td>
+              <strong>{{.Name}}</strong>
+              {{if .IsDefault}}<span class="badge slate">default</span>{{end}}
+              {{if .HTMLDirectory}}<div class="muted mono" style="font-size:.72rem">{{.HTMLDirectory}}</div>{{end}}
+            </td>
+            <td class="mono">{{default .HotspotAddress "—"}}</td>
+            <td>{{default .DNSName "—"}}</td>
+            <td>
+              {{if .LoginMethods}}
+                {{range $i, $m := .LoginMethods}}{{if $i}} {{end}}<span class="badge blue">{{$m}}</span>{{end}}
+              {{else}}<span class="muted">—</span>{{end}}
+            </td>
+            <td class="mono">{{default .RateLimit "—"}}</td>
+            <td>
+              {{if .UseRadius}}<span class="badge green">radius</span>{{else}}<span class="badge slate">local</span>{{end}}
+              {{if .RadiusAccounting}}<div class="muted" style="font-size:.72rem">accounting on</div>{{end}}
+            </td>
+            <td>
+              {{if .InstallHotspotQueue}}<span class="badge slate">queue</span>{{end}}
+              {{if .SplitUserDomain}}<span class="badge slate">split domain</span>{{end}}
+              {{if .TrialUptimeLimit}}<div class="muted" style="font-size:.72rem">trial {{.TrialUptimeLimit}}</div>{{end}}
+            </td>
+            <td class="num nowrap">
+              <a class="btn small" href="/network/{{$.Router.ID}}?tab=server-profiles&edit={{.ID}}">Edit</a>
+              <form class="inline-form" method="post" action="/network/{{$.Router.ID}}/server-profiles/{{.ID}}/delete">
+                {{template "csrf" $}}
+                <button class="btn small danger" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty">No server profile on this device yet.</div>
+    {{end}}
+  </section>
+  <section class="card" style="margin-top:16px">
+    {{$form := .ServerProfileForm}}
+    <details class="editor"{{if .Editing}} open{{end}}>
+      <summary>{{if .Editing}}Edit server profile <span class="mono">{{.Editing}}</span>{{else}}Add a server profile{{end}}</summary>
+      <form method="post" action="/network/{{$.Router.ID}}/server-profiles{{if $.Editing}}/{{$.Editing}}{{end}}">
+        {{template "csrf" $}}
+        <div class="form-grid">
+          <div class="field">
+            <label for="sp-name">Name</label>
+            <input id="sp-name" name="name" value="{{$form.Name}}" maxlength="200" placeholder="hsprof1">
+            {{with $form.Errors.name}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="sp-address">Hotspot address</label>
+            <input id="sp-address" name="hotspot_address" value="{{$form.HotspotAddress}}" placeholder="192.168.88.1">
+            {{with $form.Errors.hotspot_address}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="sp-dns">DNS name</label>
+            <input id="sp-dns" name="dns_name" value="{{$form.DNSName}}" placeholder="hotspot.local">
+            {{with $form.Errors.dns_name}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="sp-htmldir">HTML directory</label>
+            <input id="sp-htmldir" name="html_directory" value="{{$form.HTMLDirectory}}" placeholder="hotspot">
+            {{with $form.Errors.html_directory}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="sp-htmldir-override">HTML directory override</label>
+            <input id="sp-htmldir-override" name="html_directory_override" value="{{$form.HTMLDirectoryOverride}}">
+          </div>
+          <div class="field">
+            <label for="sp-rate">Rate limit</label>
+            <input id="sp-rate" name="rate_limit" value="{{$form.RateLimit}}" placeholder="2M/2M">
+            {{with $form.Errors.rate_limit}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="sp-proxy">HTTP proxy</label>
+            <input id="sp-proxy" name="http_proxy" value="{{$form.HTTPProxy}}" placeholder="none">
+            {{with $form.Errors.http_proxy}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="sp-smtp">SMTP server</label>
+            <input id="sp-smtp" name="smtp_server" value="{{$form.SMTPServer}}">
+            {{with $form.Errors.smtp_server}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="sp-cookie">HTTP cookie lifetime</label>
+            <input id="sp-cookie" name="http_cookie_lifetime" value="{{$form.HTTPCookieLifetime}}" placeholder="3d">
+            {{with $form.Errors.http_cookie_lifetime}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="sp-cert">SSL certificate</label>
+            <input id="sp-cert" name="ssl_certificate" value="{{$form.SSLCertificate}}" placeholder="none">
+          </div>
+          <div class="field">
+            <label for="sp-macauth">MAC auth mode</label>
+            <select id="sp-macauth" name="mac_auth_mode">
+              <option value=""{{if eq $form.MACAuthMode ""}} selected{{end}}>(device default)</option>
+              {{range $form.MACAuthModeOptions}}
+              <option value="{{.}}"{{if eq . $form.MACAuthMode}} selected{{end}}>{{.}}</option>
+              {{end}}
+            </select>
+            {{with $form.Errors.mac_auth_mode}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="sp-macpass">MAC auth password</label>
+            <input id="sp-macpass" name="mac_auth_password" value="{{$form.MACAuthPassword}}">
+          </div>
+          <div class="field">
+            <label for="sp-trial-limit">Trial uptime limit</label>
+            <input id="sp-trial-limit" name="trial_uptime_limit" value="{{$form.TrialUptimeLimit}}" placeholder="none">
+            {{with $form.Errors.trial_uptime_limit}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="sp-trial-reset">Trial uptime reset</label>
+            <input id="sp-trial-reset" name="trial_uptime_reset" value="{{$form.TrialUptimeReset}}" placeholder="none">
+            {{with $form.Errors.trial_uptime_reset}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="sp-trial-profile">Trial user profile</label>
+            <input id="sp-trial-profile" name="trial_user_profile" value="{{$form.TrialUserProfile}}" list="user-profile-options">
+          </div>
+          <div class="field check">
+            <input id="sp-queue" type="checkbox" name="install_hotspot_queue" value="1"{{if $form.InstallHotspotQueue}} checked{{end}}>
+            <label for="sp-queue">Install hotspot queue</label>
+          </div>
+          <div class="field check">
+            <input id="sp-split" type="checkbox" name="split_user_domain" value="1"{{if $form.SplitUserDomain}} checked{{end}}>
+            <label for="sp-split">Split user domain</label>
+          </div>
+        </div>
+        <h3 style="margin-top:16px">Login methods</h3>
+        <p class="hint">login-by — how a client on this profile may identify itself. Clear every box to leave the device default in place.</p>
+        <div class="check-row">
+          {{$selected := $form.LoginBy}}
+          {{range $form.LoginByOptions}}
+          <label class="check"><input type="checkbox" name="login_by" value="{{.}}"{{if or ($form.HasLoginMethod .) $form.LoginByAll}} checked{{end}}> <span>{{.}}</span></label>
+          {{end}}
+        </div>
+        {{with $form.Errors.login_by}}<span class="error">{{.}}</span>{{end}}
+        <h3 style="margin-top:16px">RADIUS</h3>
+        <div class="form-grid">
+          <div class="field check">
+            <input id="sp-radius" type="checkbox" name="use_radius" value="1"{{if $form.UseRadius}} checked{{end}}>
+            <label for="sp-radius">Use RADIUS</label>
+          </div>
+          <div class="field check">
+            <input id="sp-acct" type="checkbox" name="radius_accounting" value="1"{{if $form.RadiusAccounting}} checked{{end}}>
+            <label for="sp-acct">RADIUS accounting</label>
+          </div>
+          <div class="field">
+            <label for="sp-interim">RADIUS interim update</label>
+            <input id="sp-interim" name="radius_interim_update" value="{{$form.RadiusInterimUpdate}}" placeholder="received">
+            {{with $form.Errors.radius_interim_update}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="sp-nas">NAS port type</label>
+            <select id="sp-nas" name="nas_port_type">
+              <option value=""{{if eq $form.NASPortType ""}} selected{{end}}>(device default)</option>
+              {{range $form.NASPortTypeOptions}}
+              <option value="{{.}}"{{if eq . $form.NASPortType}} selected{{end}}>{{.}}</option>
+              {{end}}
+            </select>
+            {{with $form.Errors.nas_port_type}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="sp-macformat">RADIUS MAC format</label>
+            <select id="sp-macformat" name="radius_mac_format">
+              <option value=""{{if eq $form.RadiusMACFormat ""}} selected{{end}}>(device default)</option>
+              {{range $form.RadiusMACFormatOptions}}
+              <option value="{{.}}"{{if eq . $form.RadiusMACFormat}} selected{{end}}>{{.}}</option>
+              {{end}}
+            </select>
+            {{with $form.Errors.radius_mac_format}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="sp-domain">RADIUS default domain</label>
+            <input id="sp-domain" name="radius_default_domain" value="{{$form.RadiusDefaultDomain}}">
+          </div>
+          <div class="field">
+            <label for="sp-locid">RADIUS location ID</label>
+            <input id="sp-locid" name="radius_location_id" value="{{$form.RadiusLocationID}}">
+          </div>
+          <div class="field">
+            <label for="sp-locname">RADIUS location name</label>
+            <input id="sp-locname" name="radius_location_name" value="{{$form.RadiusLocationName}}">
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn primary" type="submit">{{if .Editing}}Save profile{{else}}Create profile{{end}}</button>
+          {{if .Editing}}<a class="btn" href="/network/{{.Router.ID}}?tab=server-profiles">Cancel</a>{{end}}
+        </div>
+      </form>
+    </details>
+  </section>
+{{else if eq .Tab "user-profiles"}}
+  <section class="card">
+    <h2>User profiles <span class="badge slate">{{len .UserProfiles}}</span></h2>
+    <p class="hint">/ip/hotspot/user/profile — the per login limits a hotspot user or voucher is provisioned onto: devices per login, speed, volume and the scripts around the session.</p>
+    {{if .UserProfiles}}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th><th class="num">Shared</th><th>Rate limit</th><th>Session / idle / keepalive</th>
+            <th>Queue</th><th>Extras</th><th>State</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+        {{range .UserProfiles}}
+          <tr>
+            <td>
+              <strong>{{.Name}}</strong>
+              {{if .IsDefault}}<span class="badge slate">default</span>{{end}}
+              {{if .AddressPool}}<div class="muted mono" style="font-size:.72rem">pool {{.AddressPool}}</div>{{end}}
+            </td>
+            <td class="num">{{.SharedUsersLabel}}</td>
+            <td class="mono">{{default .RateLimit "—"}}</td>
+            <td class="mono" style="font-size:.8rem">{{default .SessionTime "—"}} / {{default .IdleTimeout "—"}} / {{default .Keepalive "—"}}</td>
+            <td>
+              {{if .QueueType}}<span class="badge blue">{{.QueueType}}</span>{{else}}<span class="muted">—</span>{{end}}
+              {{if .ParentQueue}}<div class="muted mono" style="font-size:.72rem">parent {{.ParentQueue}}</div>{{end}}
+            </td>
+            <td>
+              {{if .AddMACCookie}}<span class="badge slate">mac cookie</span>{{end}}
+              {{if .TransparentProxy}}<span class="badge slate">proxy</span>{{end}}
+              {{if .Advertise}}<span class="badge slate">advertise</span>{{end}}
+              {{if .OnLogin}}<div class="muted" style="font-size:.72rem">on-login script</div>{{end}}
+              {{if .OnLogout}}<div class="muted" style="font-size:.72rem">on-logout script</div>{{end}}
+              {{if .AddressList}}<div class="muted mono" style="font-size:.72rem">list {{.AddressList}}</div>{{end}}
+            </td>
+            <td>{{if .IsDefault}}<span class="badge slate">built in</span>{{else}}<span class="badge green">custom</span>{{end}}</td>
+            <td class="num nowrap">
+              <a class="btn small" href="/network/{{$.Router.ID}}?tab=user-profiles&edit={{.ID}}">Edit</a>
+              <form class="inline-form" method="post" action="/network/{{$.Router.ID}}/user-profiles/{{.ID}}/delete">
+                {{template "csrf" $}}
+                <button class="btn small danger" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty">No user profile on this device yet. Vouchers need at least one to be provisioned onto.</div>
+    {{end}}
+  </section>
+  <section class="card" style="margin-top:16px">
+    {{$form := .UserProfileForm}}
+    <details class="editor"{{if .Editing}} open{{end}}>
+      <summary>{{if .Editing}}Edit user profile <span class="mono">{{.Editing}}</span>{{else}}Add a user profile{{end}}</summary>
+      <form method="post" action="/network/{{$.Router.ID}}/user-profiles{{if $.Editing}}/{{$.Editing}}{{end}}">
+        {{template "csrf" $}}
+        <div class="form-grid">
+          <div class="field">
+            <label for="up-name">Name</label>
+            <input id="up-name" name="name" value="{{$form.Name}}" maxlength="200" placeholder="1hour">
+            {{with $form.Errors.name}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="up-shared">Shared users</label>
+            <input id="up-shared" name="shared_users" value="{{$form.SharedUsers}}" placeholder="1 or unlimited">
+            {{with $form.Errors.shared_users}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="up-pool">Address pool</label>
+            <input id="up-pool" name="address_pool" value="{{$form.AddressPool}}" list="pool-options">
+          </div>
+          <div class="field">
+            <label for="up-rate">Rate limit</label>
+            <input id="up-rate" name="rate_limit" value="{{$form.RateLimit}}" placeholder="1M/1M">
+            {{with $form.Errors.rate_limit}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="up-session">Session timeout</label>
+            <input id="up-session" name="session_timeout" value="{{$form.SessionTime}}" placeholder="1h">
+            {{with $form.Errors.session_timeout}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="up-idle">Idle timeout</label>
+            <input id="up-idle" name="idle_timeout" value="{{$form.IdleTimeout}}" placeholder="5m">
+            {{with $form.Errors.idle_timeout}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="up-keepalive">Keepalive timeout</label>
+            <input id="up-keepalive" name="keepalive_timeout" value="{{$form.Keepalive}}" placeholder="2m">
+            {{with $form.Errors.keepalive_timeout}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="up-refresh">Status autorefresh</label>
+            <input id="up-refresh" name="status_autorefresh" value="{{$form.StatusAutorefresh}}" placeholder="1m">
+            {{with $form.Errors.status_autorefresh}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="up-list">Address list</label>
+            <input id="up-list" name="address_list" value="{{$form.AddressList}}">
+          </div>
+          <div class="field">
+            <label for="up-cookie-timeout">MAC cookie timeout</label>
+            <input id="up-cookie-timeout" name="mac_cookie_timeout" value="{{$form.MACCookieTimeout}}" placeholder="3d">
+            {{with $form.Errors.mac_cookie_timeout}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field check">
+            <input id="up-cookie" type="checkbox" name="add_mac_cookie" value="1"{{if $form.AddMACCookie}} checked{{end}}>
+            <label for="up-cookie">Add MAC cookie</label>
+          </div>
+          <div class="field check">
+            <input id="up-proxy" type="checkbox" name="transparent_proxy" value="1"{{if $form.TransparentProxy}} checked{{end}}>
+            <label for="up-proxy">Transparent proxy</label>
+          </div>
+        </div>
+        <h3 style="margin-top:16px">Filters and packet marks</h3>
+        <p class="hint">These name firewall entries and queues the device already holds; the controller does not create them, it only points the profile at them.</p>
+        <div class="form-grid">
+          <div class="field">
+            <label for="up-qtype">Queue type</label>
+            <input id="up-qtype" name="queue_type" value="{{$form.QueueType}}" list="queue-type-options" placeholder="default-small">
+          </div>
+          <div class="field">
+            <label for="up-parent">Parent queue</label>
+            <input id="up-parent" name="parent_queue" value="{{$form.ParentQueue}}" placeholder="none">
+          </div>
+          <div class="field">
+            <label for="up-insert">Insert queue before</label>
+            <select id="up-insert" name="insert_queue_before">
+              <option value=""{{if eq $form.InsertQueueBefore ""}} selected{{end}}>(device default)</option>
+              {{range $form.QueuePositionOptions}}
+              <option value="{{.}}"{{if eq . $form.InsertQueueBefore}} selected{{end}}>{{.}}</option>
+              {{end}}
+            </select>
+            {{with $form.Errors.insert_queue_before}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="up-infilter">Incoming filter</label>
+            <input id="up-infilter" name="incoming_filter" value="{{$form.IncomingFilter}}">
+          </div>
+          <div class="field">
+            <label for="up-outfilter">Outgoing filter</label>
+            <input id="up-outfilter" name="outgoing_filter" value="{{$form.OutgoingFilter}}">
+          </div>
+          <div class="field">
+            <label for="up-inmark">Incoming packet mark</label>
+            <input id="up-inmark" name="incoming_packet_mark" value="{{$form.IncomingPktMark}}">
+          </div>
+          <div class="field">
+            <label for="up-outmark">Outgoing packet mark</label>
+            <input id="up-outmark" name="outgoing_packet_mark" value="{{$form.OutgoingPktMark}}">
+          </div>
+          <div class="field">
+            <label for="up-status">Open status page</label>
+            <select id="up-status" name="open_status_page">
+              <option value=""{{if eq $form.OpenStatusPage ""}} selected{{end}}>(device default)</option>
+              {{range $form.OpenStatusPageOptions}}
+              <option value="{{.}}"{{if eq . $form.OpenStatusPage}} selected{{end}}>{{.}}</option>
+              {{end}}
+            </select>
+            {{with $form.Errors.open_status_page}}<span class="error">{{.}}</span>{{end}}
+          </div>
+        </div>
+        <h3 style="margin-top:16px">Scripts</h3>
+        <p class="hint">RouterOS scripts run as the session starts and ends, for example to log a voucher to a syslog server.</p>
+        <div class="field">
+          <label for="up-onlogin">On login</label>
+          <textarea id="up-onlogin" name="on_login" rows="2" maxlength="200">{{$form.OnLogin}}</textarea>
+          {{with $form.Errors.on_login}}<span class="error">{{.}}</span>{{end}}
+        </div>
+        <div class="field">
+          <label for="up-onlogout">On logout</label>
+          <textarea id="up-onlogout" name="on_logout" rows="2" maxlength="200">{{$form.OnLogout}}</textarea>
+          {{with $form.Errors.on_logout}}<span class="error">{{.}}</span>{{end}}
+        </div>
+        <h3 style="margin-top:16px">Advertise</h3>
+        <p class="hint">The advertise feature injects the interval below into the client's browser while it is signed in.</p>
+        <div class="form-grid">
+          <div class="field check">
+            <input id="up-advertise" type="checkbox" name="advertise" value="1"{{if $form.Advertise}} checked{{end}}>
+            <label for="up-advertise">Advertise</label>
+          </div>
+          <div class="field">
+            <label for="up-advertise-url">Advertise URL</label>
+            <input id="up-advertise-url" name="advertise_url" value="{{$form.AdvertiseURL}}" placeholder="http://example.com/banner">
+          </div>
+          <div class="field">
+            <label for="up-advertise-interval">Advertise interval</label>
+            <input id="up-advertise-interval" name="advertise_interval" value="{{$form.AdvertiseInterval}}" placeholder="5m">
+            {{with $form.Errors.advertise_interval}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="up-advertise-timeout">Advertise timeout</label>
+            <input id="up-advertise-timeout" name="advertise_timeout" value="{{$form.AdvertiseTimeout}}" placeholder="1m">
+            {{with $form.Errors.advertise_timeout}}<span class="error">{{.}}</span>{{end}}
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn primary" type="submit">{{if .Editing}}Save profile{{else}}Create profile{{end}}</button>
+          {{if .Editing}}<a class="btn" href="/network/{{.Router.ID}}?tab=user-profiles">Cancel</a>{{end}}
+        </div>
+      </form>
+    </details>
+  </section>
+  <datalist id="queue-type-options">
+    <option value="default-small"></option><option value="default"></option><option value="ethernet-default"></option>
+    <option value="wireless-default"></option><option value="pcq-upload-default"></option><option value="pcq-download-default"></option>
+  </datalist>
+{{else if eq .Tab "walled-garden"}}
+  <section class="card">
+    <h2>Walled garden <span class="badge slate">{{len .WalledGarden}}</span></h2>
+    <p class="hint">/ip/hotspot/walled-garden — sites a client may reach before signing in: a payment page, a carrier portal or a bank.</p>
+    {{if .WalledGarden}}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Server</th><th>Destination</th><th>Port / path</th><th>Client</th>
+            <th class="num">Hits</th><th>State</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+        {{range .WalledGarden}}
+          <tr>
+            <td>{{if .Server}}<span class="badge slate">{{.Server}}</span>{{else}}<span class="muted">any</span>{{end}}
+              {{if .Comment}}<div class="muted" style="font-size:.76rem">{{.Comment}}</div>{{end}}
+            </td>
+            <td>
+              <div class="mono">{{default .DstHost "any host"}}</div>
+              {{if .DstAddress}}<div class="muted mono" style="font-size:.72rem">resolves to {{.DstAddress}}</div>{{end}}
+              <div>{{range $i, $m := .Methods}}{{if $i}} {{end}}<span class="badge blue">{{$m}}</span>{{end}}</div>
+            </td>
+            <td class="mono" style="font-size:.8rem">{{default .DstPort "any"}} / {{default .Path "any"}}</td>
+            <td class="mono" style="font-size:.8rem">{{default .SrcAddress "any"}}</td>
+            <td class="num">{{.Hits}}</td>
+            <td>
+              {{if .Disabled}}<span class="badge slate">disabled</span>{{else}}<span class="badge green">enabled</span>{{end}}
+              {{if .Allows}}<div class="muted" style="font-size:.72rem">allows</div>{{else}}<div class="muted" style="font-size:.72rem">denies</div>{{end}}
+            </td>
+            <td class="num nowrap">
+              <a class="btn small" href="/network/{{$.Router.ID}}?tab=walled-garden&edit={{.ID}}">Edit</a>
+              <form class="inline-form" method="post" action="/network/{{$.Router.ID}}/walled-garden/{{.ID}}/toggle">
+                {{template "csrf" $}}
+                <input type="hidden" name="disabled" value="{{if .Disabled}}0{{else}}1{{end}}">
+                <button class="btn small" type="submit">{{if .Disabled}}Enable{{else}}Disable{{end}}</button>
+              </form>
+              <form class="inline-form" method="post" action="/network/{{$.Router.ID}}/walled-garden/{{.ID}}/delete">
+                {{template "csrf" $}}
+                <button class="btn small danger" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty">No walled garden rule on this device. Clients can only reach the login portal until you add one.</div>
+    {{end}}
+  </section>
+  <section class="card" style="margin-top:16px">
+    {{$form := .WalledGardenForm}}
+    <details class="editor"{{if .Editing}} open{{end}}>
+      <summary>{{if .Editing}}Edit walled garden rule <span class="mono">{{.Editing}}</span>{{else}}Add a walled garden rule{{end}}</summary>
+      <form method="post" action="/network/{{$.Router.ID}}/walled-garden{{if $.Editing}}/{{$.Editing}}{{end}}">
+        {{template "csrf" $}}
+        <div class="form-grid">
+          <div class="field">
+            <label for="wg-server">Server</label>
+            <select id="wg-server" name="server">
+              {{range $.ServerOptions}}<option value="{{.}}"{{if eq . $form.Server}} selected{{end}}>{{if .}}{{.}}{{else}}(all servers){{end}}</option>{{end}}
+            </select>
+          </div>
+          <div class="field">
+            <label for="wg-host">Destination host</label>
+            <input id="wg-host" name="dst_host" value="{{$form.DstHost}}" maxlength="200" placeholder="payment.example.com">
+            {{with $form.Errors.dst_host}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="wg-port">Destination port</label>
+            <input id="wg-port" name="dst_port" value="{{$form.DstPort}}" placeholder="80,443">
+            {{with $form.Errors.dst_port}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="wg-path">Path</label>
+            <input id="wg-path" name="path" value="{{$form.Path}}" maxlength="200" placeholder="/*.png">
+            {{with $form.Errors.path}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="wg-src">Client address</label>
+            <input id="wg-src" name="src_address" value="{{$form.SrcAddress}}" placeholder="192.168.88.0/24">
+            {{with $form.Errors.src_address}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="wg-action">Action</label>
+            <select id="wg-action" name="action">
+              {{range $form.ActionOptions}}<option value="{{.}}"{{if eq . $form.Action}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+            {{with $form.Errors.action}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="wg-comment">Comment</label>
+            <input id="wg-comment" name="comment" value="{{$form.Comment}}" maxlength="200">
+            {{with $form.Errors.comment}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field check">
+            <input id="wg-disabled" type="checkbox" name="disabled" value="1"{{if $form.Disabled}} checked{{end}}>
+            <label for="wg-disabled">Disabled</label>
+          </div>
+        </div>
+        <h3 style="margin-top:16px">HTTP methods</h3>
+        <p class="hint">method — the request methods the rule matches. Clear every box to match all of them.</p>
+        <div class="check-row">
+          {{range $form.MethodOptions}}
+          <label class="check"><input type="checkbox" name="method" value="{{.}}"{{if or ($form.HasMethod .) $form.MethodAll}} checked{{end}}> <span>{{.}}</span></label>
+          {{end}}
+        </div>
+        {{with $form.Errors.method}}<span class="error">{{.}}</span>{{end}}
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn primary" type="submit">{{if .Editing}}Save rule{{else}}Create rule{{end}}</button>
+          {{if .Editing}}<a class="btn" href="/network/{{.Router.ID}}?tab=walled-garden">Cancel</a>{{end}}
+        </div>
+      </form>
+    </details>
+  </section>
+{{else if eq .Tab "walled-garden-ip"}}
+  <section class="card">
+    <h2>Walled garden IP <span class="badge slate">{{len .WalledGardenIP}}</span></h2>
+    <p class="hint">/ip/hotspot/walled-garden/ip — address and protocol rules evaluated before the login check.</p>
+    {{if .WalledGardenIP}}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Server</th><th>Destination</th><th>Protocol / port</th><th>Client</th>
+            <th>Action</th><th>State</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+        {{range .WalledGardenIP}}
+          <tr>
+            <td>{{if .Server}}<span class="badge slate">{{.Server}}</span>{{else}}<span class="muted">any</span>{{end}}
+              {{if .Comment}}<div class="muted" style="font-size:.76rem">{{.Comment}}</div>{{end}}
+            </td>
+            <td>
+              <div class="mono">{{default .DstAddress (default .DstHost "any")}}</div>
+              {{if .DstAddressList}}<div class="muted mono" style="font-size:.72rem">list {{.DstAddressList}}</div>{{end}}
+            </td>
+            <td class="mono" style="font-size:.8rem">{{default .Protocol "any"}} / {{default .DstPort "any"}}</td>
+            <td>
+              <div class="mono" style="font-size:.8rem">{{default .SrcAddress "any"}}</div>
+              {{if .SrcAddressList}}<div class="muted mono" style="font-size:.72rem">list {{.SrcAddressList}}</div>{{end}}
+            </td>
+            <td>{{if .Allows}}<span class="badge green">{{.Action}}</span>{{else}}<span class="badge red">{{.Action}}</span>{{end}}</td>
+            <td>{{if .Disabled}}<span class="badge slate">disabled</span>{{else}}<span class="badge green">enabled</span>{{end}}</td>
+            <td class="num nowrap">
+              <a class="btn small" href="/network/{{$.Router.ID}}?tab=walled-garden-ip&edit={{.ID}}">Edit</a>
+              <form class="inline-form" method="post" action="/network/{{$.Router.ID}}/walled-garden-ip/{{.ID}}/toggle">
+                {{template "csrf" $}}
+                <input type="hidden" name="disabled" value="{{if .Disabled}}0{{else}}1{{end}}">
+                <button class="btn small" type="submit">{{if .Disabled}}Enable{{else}}Disable{{end}}</button>
+              </form>
+              <form class="inline-form" method="post" action="/network/{{$.Router.ID}}/walled-garden-ip/{{.ID}}/delete">
+                {{template "csrf" $}}
+                <button class="btn small danger" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty">No walled garden IP rule on this device.</div>
+    {{end}}
+  </section>
+  <section class="card" style="margin-top:16px">
+    {{$form := .WalledGardenIPForm}}
+    <details class="editor"{{if .Editing}} open{{end}}>
+      <summary>{{if .Editing}}Edit IP rule <span class="mono">{{.Editing}}</span>{{else}}Add a walled garden IP rule{{end}}</summary>
+      <form method="post" action="/network/{{$.Router.ID}}/walled-garden-ip{{if $.Editing}}/{{$.Editing}}{{end}}">
+        {{template "csrf" $}}
+        <div class="form-grid">
+          <div class="field">
+            <label for="wgi-server">Server</label>
+            <select id="wgi-server" name="server">
+              {{range $.ServerOptions}}<option value="{{.}}"{{if eq . $form.Server}} selected{{end}}>{{if .}}{{.}}{{else}}(all servers){{end}}</option>{{end}}
+            </select>
+          </div>
+          <div class="field">
+            <label for="wgi-dst">Destination address</label>
+            <input id="wgi-dst" name="dst_address" value="{{$form.DstAddress}}" placeholder="10.0.0.1-10.0.0.20">
+            {{with $form.Errors.dst_address}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="wgi-host">Destination host</label>
+            <input id="wgi-host" name="dst_host" value="{{$form.DstHost}}" maxlength="200" placeholder="example.com">
+            {{with $form.Errors.dst_host}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="wgi-proto">Protocol</label>
+            <input id="wgi-proto" name="protocol" value="{{$form.Protocol}}" maxlength="200" placeholder="tcp">
+            {{with $form.Errors.protocol}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="wgi-port">Destination port</label>
+            <input id="wgi-port" name="dst_port" value="{{$form.DstPort}}" placeholder="80,443">
+            {{with $form.Errors.dst_port}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="wgi-src">Client address</label>
+            <input id="wgi-src" name="src_address" value="{{$form.SrcAddress}}" placeholder="192.168.88.0/24">
+            {{with $form.Errors.src_address}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="wgi-srclist">Client address list</label>
+            <input id="wgi-srclist" name="src_address_list" value="{{$form.SrcAddressList}}" maxlength="200">
+            {{with $form.Errors.src_address_list}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="wgi-dstlist">Destination address list</label>
+            <input id="wgi-dstlist" name="dst_address_list" value="{{$form.DstAddressList}}" maxlength="200">
+            {{with $form.Errors.dst_address_list}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="wgi-action">Action</label>
+            <select id="wgi-action" name="action">
+              {{range $form.ActionOptions}}<option value="{{.}}"{{if eq . $form.Action}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+            {{with $form.Errors.action}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="wgi-comment">Comment</label>
+            <input id="wgi-comment" name="comment" value="{{$form.Comment}}" maxlength="200">
+            {{with $form.Errors.comment}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field check">
+            <input id="wgi-disabled" type="checkbox" name="disabled" value="1"{{if $form.Disabled}} checked{{end}}>
+            <label for="wgi-disabled">Disabled</label>
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn primary" type="submit">{{if .Editing}}Save IP rule{{else}}Create IP rule{{end}}</button>
+          {{if .Editing}}<a class="btn" href="/network/{{.Router.ID}}?tab=walled-garden-ip">Cancel</a>{{end}}
+        </div>
+      </form>
+    </details>
+  </section>
+{{end}}
+{{end}}
+</main>
+{{template "footer" .}}
+</body>
+</html>

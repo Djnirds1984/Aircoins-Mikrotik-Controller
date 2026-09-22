@@ -111,6 +111,38 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("POST /routers/{id}/block", h.ClientBlock)
 	mux.HandleFunc("POST /routers/{id}/unblock", h.ClientUnblock)
 
+	// Network tab: hotspot configuration of one device.
+	mux.HandleFunc("GET /network", h.NetworkOverview)
+	mux.HandleFunc("GET /network/{id}", h.NetworkDetail)
+
+	// Hotspot servers (/ip/hotspot).
+	mux.HandleFunc("POST /network/{id}/servers", h.HotspotServerCreate)
+	mux.HandleFunc("POST /network/{id}/servers/{sid}", h.HotspotServerUpdate)
+	mux.HandleFunc("POST /network/{id}/servers/{sid}/toggle", h.HotspotServerToggle)
+	mux.HandleFunc("POST /network/{id}/servers/{sid}/delete", h.HotspotServerDelete)
+
+	// Hotspot server profiles (/ip/hotspot/profile).
+	mux.HandleFunc("POST /network/{id}/server-profiles", h.HotspotServerProfileCreate)
+	mux.HandleFunc("POST /network/{id}/server-profiles/{sid}", h.HotspotServerProfileUpdate)
+	mux.HandleFunc("POST /network/{id}/server-profiles/{sid}/delete", h.HotspotServerProfileDelete)
+
+	// Hotspot user profiles (/ip/hotspot/user/profile).
+	mux.HandleFunc("POST /network/{id}/user-profiles", h.HotspotUserProfileCreate)
+	mux.HandleFunc("POST /network/{id}/user-profiles/{sid}", h.HotspotUserProfileUpdate)
+	mux.HandleFunc("POST /network/{id}/user-profiles/{sid}/delete", h.HotspotUserProfileDelete)
+
+	// Walled garden hosts (/ip/hotspot/walled-garden).
+	mux.HandleFunc("POST /network/{id}/walled-garden", h.WalledGardenCreate)
+	mux.HandleFunc("POST /network/{id}/walled-garden/{sid}", h.WalledGardenUpdate)
+	mux.HandleFunc("POST /network/{id}/walled-garden/{sid}/toggle", h.WalledGardenToggle)
+	mux.HandleFunc("POST /network/{id}/walled-garden/{sid}/delete", h.WalledGardenDelete)
+
+	// Walled garden IP rules (/ip/hotspot/walled-garden/ip).
+	mux.HandleFunc("POST /network/{id}/walled-garden-ip", h.WalledGardenIPCreate)
+	mux.HandleFunc("POST /network/{id}/walled-garden-ip/{sid}", h.WalledGardenIPUpdate)
+	mux.HandleFunc("POST /network/{id}/walled-garden-ip/{sid}/toggle", h.WalledGardenIPToggle)
+	mux.HandleFunc("POST /network/{id}/walled-garden-ip/{sid}/delete", h.WalledGardenIPDelete)
+
 	// Session history.
 	mux.HandleFunc("GET /sessions", h.SessionsList)
 
