@@ -343,12 +343,12 @@
           </div>
           <div class="field">
             <label for="erest_port">Web port for REST</label>
-            <input id="erest_port" name="rest_port" value="{{.Form.RestPort}}" placeholder="10775 or 443" inputmode="numeric">
-            <span class="muted" style="font-size:.78rem">Required for HTTP REST; HTTPS defaults to 443. Port 80 is never selected automatically and is disabled for HTTP REST.</span>
+            <input id="erest_port" name="rest_port" value="{{.Form.RestPort}}" placeholder="10775, 80 or 443" inputmode="numeric">
+            <span class="muted" style="font-size:.78rem">Required for HTTP REST; HTTPS defaults to 443. Port 80 is never chosen automatically — type it explicitly if that is the router's www port.</span>
           </div>
           <div class="field">
-            <label for="eport">API port</label>
-            <input id="eport" name="port" value="{{.Form.Port}}" required>
+            <label for="eport">API port (ignored for REST)</label>
+            <input id="eport" name="port" value="{{.Form.Port}}" inputmode="numeric" placeholder="8728"> {{with .Form.Errors.port}}<span class="error">{{.}}</span>{{end}} <span class="muted" style="font-size:.78rem">Used only by Auto, API (8728) and API-SSL (8729). Leave it at 8728 for REST.</span>
           </div>
           <div class="field">
             <label for="eusername">API user</label>

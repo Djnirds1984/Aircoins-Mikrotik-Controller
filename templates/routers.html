@@ -55,12 +55,12 @@
             <label for="rest_port">Web port for REST (optional)</label>
             <input id="rest_port" name="rest_port" value="{{.Form.RestPort}}" placeholder="443" inputmode="numeric">
             {{with .Form.Errors.rest_port}}<span class="error">{{.}}</span>{{end}}
-            <span class="muted" style="font-size:.78rem">Enter the actual www port for HTTP REST, for example 10775. Port 80 is never selected automatically.</span>
+            <span class="muted" style="font-size:.78rem">Enter the actual www port for HTTP REST, for example 10775 — or 80 if that is really the router's www port. Never chosen automatically.</span>
           </div>
           <div class="field">
-            <label for="port">API port</label>
-            <input id="port" name="port" value="{{.Form.Port}}" inputmode="numeric" required>
-            {{with .Form.Errors.port}}<span class="error">{{.}}</span>{{end}}
+            <label for="port">API port (ignored for REST)</label>
+            <input id="port" name="port" value="{{.Form.Port}}" inputmode="numeric" placeholder="8728">
+            {{with .Form.Errors.port}}<span class="error">{{.}}</span>{{end}} <span class="muted" style="font-size:.78rem">Used only by Auto, API (8728) and API-SSL (8729). Leave it at 8728 for REST — a port number, never an IP address.</span>
           </div>
           <div class="field">
             <label for="username">API user</label>

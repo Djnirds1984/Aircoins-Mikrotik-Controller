@@ -457,7 +457,8 @@ func TestRestCandidateSelection(t *testing.T) {
 	if len(got) != 1 || got[0].mode != database.TransportREST || got[0].port != 0 {
 		t.Errorf("explicit plain REST without a port = %#v", got)
 	}
-	// HTTP remains available only with an explicit non-80 port.
+	// A port the operator typed explicitly - including 80 - is passed through
+	// and dialled; the controller must not refuse it outright.
 	router.Transport = database.TransportREST
 	router.RestPort = 80
 	got = transportCandidates(router)
@@ -465,8 +466,8 @@ func TestRestCandidateSelection(t *testing.T) {
 		t.Fatalf("explicit plain REST on 80 = %#v", got)
 	}
 	_, port80Err := DialRouter(context.Background(), router, time.Second, slog.New(slog.DiscardHandler))
-	if port80Err == nil || !strings.Contains(port80Err.Error(), "other than 80") {
-		t.Fatalf("dialer on explicit port 80 = %v, want a refusal", port80Err)
+	if port80Err != nil && strings.Contains(port80Err.Error(), "never chosen automatically") {
+		t.Fatalf("dialer refused an explicitly typed port 80: %v", port80Err)
 	}
 	router.Transport = database.TransportREST
 	router.RestPort = 8080

@@ -56,7 +56,8 @@ type routerForm struct {
 	// Transport selects the protocol: auto, api, api-ssl, rest or rest-ssl.
 	Transport string
 	// RestPort is the www/www-ssl port used by the REST transports. Empty means
-	// 443 for HTTPS and 80 for plain HTTP.
+	// 443 for HTTPS; plain HTTP requires an explicit value, and only a port the
+	// operator actually typed (80 included) is ever dialled.
 	RestPort string
 
 	Errors map[string]string
@@ -123,7 +124,7 @@ func (f *routerForm) validate(requirePassword bool) bool {
 		f.Errors["host"] = "Enter the router IP address or hostname reachable on the API port."
 	}
 	if f.port() == 0 {
-		f.Errors["port"] = "Port must be between 1 and 65535 (8728 for the API, 8729 for API-SSL)."
+		f.Errors["port"] = "Port must be a number between 1 and 65535 (8728 for API, 8729 for API-SSL). REST ignores this field - it is never an IP address."
 	}
 	if f.Username == "" {
 		f.Errors["username"] = "Enter the RouterOS API user (for example \"aircoins\")."
@@ -136,8 +137,8 @@ func (f *routerForm) validate(requirePassword bool) bool {
 	}
 	if f.restPort() < 0 {
 		f.Errors["rest_port"] = "Enter the web port for REST (for example 10775); port 80 is not used automatically."
-	} else if f.Transport == database.TransportREST && (f.restPort() == 0 || f.restPort() == 80) {
-		f.Errors["rest_port"] = "REST over HTTP requires an explicit web port other than 80, such as 10775. Port 80 is disabled for safety."
+	} else if f.Transport == database.TransportREST && f.restPort() == 0 {
+		f.Errors["rest_port"] = "REST over HTTP needs the www port typed explicitly (for example 10775, or 80 if that is the router's www port); it is never chosen automatically."
 	}
 	return len(f.Errors) == 0
 }
