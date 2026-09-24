@@ -287,6 +287,17 @@ canvas#trafficCanvas{
     return val.toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
   }
 
+  // formatRate renders a RouterOS interface rate (bits per second, as the
+  // REST monitor-traffic merge reports it) for the RX/TX rate cards.
+  function formatRate(bps){
+    if(!bps || bps < 1) return '0 bps';
+    const units = ['bps', 'Kbps', 'Mbps', 'Gbps'];
+    const k = 1000;
+    const i = Math.min(Math.floor(Math.log(bps) / Math.log(k)), units.length - 1);
+    const val = bps / Math.pow(k, i);
+    return val.toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+  }
+
   function drawGraph(){
     if(!canvas || !ctx) return;
     const rect = canvas.getBoundingClientRect();
@@ -424,136 +435,6 @@ canvas#trafficCanvas{
   });
 
   setTimeout(resizeCanvas, 100);
-})();
-</script>    if(!routerId || !interfaceId) return;
-    loadingGraph.style.display = 'block';
-    graphContainer.style.display = 'none';
-    try{
-      const resp = await fetch('/api/v1/routers/' + routerId + '/interfaces/' + interfaceId + '/traffic');
-      if(!resp.ok) throw new Error('Failed to load traffic data');
-      const data = await resp.json();
-      trafficData = data.points.map(p => ({
-        timestamp: new Date(p.timestamp).getTime(),
-        rxBytes: p.rx_bytes,
-        txBytes: p.tx_bytes,
-        rxRate: p.rx_rate,
-        txRate: p.tx_rate
-      }));
-      document.getElementById('ifaceName').textContent = data.interface_name;
-      document.getElementById('ifaceType').textContent = '—';
-      document.getElementById('ifaceMAC').textContent = '—';
-      document.getElementById('ifaceMTU').textContent = '—';
-      document.getElementById('ifaceRx').textContent = formatBytes(trafficData[trafficData.length-1].rxBytes);
-      document.getElementById('ifaceTx').textContent = formatBytes(trafficData[trafficData.length-1].txBytes);
-      document.getElementById('ifaceRxRate').textContent = formatRate(trafficData[trafficData.length-1].rxRate);
-      document.getElementById('ifaceTxRate').textContent = formatRate(trafficData[trafficData.length-1].txRate);
-      interfaceInfo.style.display = 'flex';
-      graphContainer.style.display = 'block';
-      noInterface.style.display = 'none';
-      loadingGraph.style.display = 'none';
-      resizeCanvas();
-      drawGraph();
-      graphStatus.textContent = 'Live • ' + trafficData.length + ' points';
-    }catch(err){
-      loadingGraph.style.display = 'none';
-      graphStatus.textContent = 'Error: ' + err.message;
-    }
-  }
-    const width = rect.width;
-    const height = rect.height;
-    const padding = {top: 20, right: 20, bottom: 30, left: 50};
-    const graphWidth = width - padding.left - padding.right;
-    const graphHeight = height - padding.top - padding.bottom;
-    ctx.clearRect(0, 0, width, height);
-    if(trafficData.length < 2){
-      ctx.fillStyle = '#8fa3c4';
-      ctx.font = '13px -apple-system, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('Waiting for data...', width/2, height/2);
-      return;
-    }
-    let maxRx = 0, maxTx = 0;
-    for(const p of trafficData){
-      if(p.rxBytes > maxRx) maxRx = p.rxBytes;
-      if(p.txBytes > maxTx) maxTx = p.txBytes;
-    }
-    const maxVal = Math.max(maxRx, maxTx, 1);
-    const xScale = graphWidth / Math.max(trafficData.length - 1, 1);
-    const yScale = graphHeight / maxVal;
-    ctx.strokeStyle = '#22304d';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    for(let i = 0; i <= 4; i++){
-      const y = padding.top + (graphHeight * i / 4);
-      ctx.beginPath();
-      ctx.moveTo(padding.left, y);
-      ctx.lineTo(width - padding.right, y);
-      ctx.stroke();
-    }
-    ctx.setLineDash([]);
-    ctx.fillStyle = '#8fa3c4';
-    ctx.font = '11px ui-monospace, monospace';
-    ctx.textAlign = 'right';
-    for(let i = 0; i <= 4; i++){
-      const y = padding.top + (graphHeight * i / 4);
-      const val = Math.round(maxVal * (1 - i/4));
-      ctx.fillText(formatBytes(val), padding.left - 8, y + 4);
-    }
-    const timeRange = trafficData.length > 1 ?
-      (trafficData[trafficData.length-1].timestamp - trafficData[0].timestamp) / 1000 : 0;
-    graphTimeRange.textContent = timeRange > 0 ? 'Last ' + timeRange.toFixed(0) + 's' : '';
-    if(trafficData.length > 1){
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      for(let i = 0; i < trafficData.length; i++){
-        const x = padding.left + (i * xScale);
-        const y = padding.top + graphHeight - (trafficData[i].rxBytes * yScale);
-        if(i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-      ctx.strokeStyle = '#22d3ee';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      for(let i = 0; i < trafficData.length; i++){
-        const x = padding.left + (i * xScale);
-        const y = padding.top + graphHeight - (trafficData[i].txBytes * yScale);
-        if(i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.1)';
-      ctx.beginPath();
-      ctx.moveTo(padding.left, padding.top + graphHeight);
-      for(let i = 0; i < trafficData.length; i++){
-        const x = padding.left + (i * xScale);
-        const y = padding.top + graphHeight - (trafficData[i].rxBytes * yScale);
-        ctx.lineTo(x, y);
-      }
-      ctx.lineTo(padding.left + ((trafficData.length-1) * xScale), padding.top + graphHeight);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = 'rgba(34, 211, 238, 0.1)';
-      ctx.beginPath();
-      ctx.moveTo(padding.left, padding.top + graphHeight);
-      for(let i = 0; i < trafficData.length; i++){
-        const x = padding.left + (i * xScale);
-        const y = padding.top + graphHeight - (trafficData[i].txBytes * yScale);
-        ctx.lineTo(x, y);
-      }
-      ctx.lineTo(padding.left + ((trafficData.length-1) * xScale), padding.top + graphHeight);
-      ctx.closePath();
-      ctx.fill();
-      const last = trafficData[trafficData.length - 1];
-      ctx.font = 'bold 12px ui-monospace, monospace';
-      ctx.textAlign = 'left';
-      ctx.fillStyle = '#38bdf8';
-      ctx.fillText('RX: ' + formatBytes(last.rxBytes), padding.left + 5, padding.top - 5);
-      ctx.fillStyle = '#22d3ee';
-      ctx.fillText('TX: ' + formatBytes(last.txBytes), padding.left + 5, padding.top + 10);
-    }
-  }
 
   async function loadInterfaces(routerId){
     if(!routerId){
@@ -590,6 +471,9 @@ canvas#trafficCanvas{
       const resp = await fetch('/api/v1/routers/' + routerId + '/interfaces/' + interfaceId + '/traffic');
       if(!resp.ok) throw new Error('Failed to load traffic data');
       const data = await resp.json();
+      if(!Array.isArray(data.points) || data.points.length === 0){
+        throw new Error('No traffic samples returned yet');
+      }
       trafficData = data.points.map(p => ({
         timestamp: new Date(p.timestamp).getTime(),
         rxBytes: p.rx_bytes,
@@ -597,10 +481,11 @@ canvas#trafficCanvas{
         rxRate: p.rx_rate,
         txRate: p.tx_rate
       }));
-      document.getElementById('ifaceName').textContent = data.interface_name;
-      document.getElementById('ifaceType').textContent = '—';
-      document.getElementById('ifaceMAC').textContent = '—';
-      document.getElementById('ifaceMTU').textContent = '—';
+      const info = data.interface || {};
+      document.getElementById('ifaceName').textContent = data.interface_name || info.name || '';
+      document.getElementById('ifaceType').textContent = info.type || '—';
+      document.getElementById('ifaceMAC').textContent = info.mac_address || '—';
+      document.getElementById('ifaceMTU').textContent = info.mtu || '—';
       document.getElementById('ifaceRx').textContent = formatBytes(trafficData[trafficData.length-1].rxBytes);
       document.getElementById('ifaceTx').textContent = formatBytes(trafficData[trafficData.length-1].txBytes);
       document.getElementById('ifaceRxRate').textContent = formatRate(trafficData[trafficData.length-1].rxRate);
@@ -617,40 +502,6 @@ canvas#trafficCanvas{
       graphStatus.textContent = 'Error: ' + err.message;
     }
   }
-  routerSelect.addEventListener('change', function(){
-    currentRouterId = this.value;
-    currentInterfaceId = null;
-    trafficData = [];
-    loadInterfaces(currentRouterId);
-  });
-  interfaceSelect.addEventListener('change', function(){
-    currentInterfaceId = this.value;
-    if(currentInterfaceId){
-      loadTrafficData(currentRouterId, currentInterfaceId);
-      if(pollingInterval) clearInterval(pollingInterval);
-      pollingInterval = setInterval(function(){
-        loadTrafficData(currentRouterId, currentInterfaceId);
-      }, 2000);
-    }else{
-      if(pollingInterval) clearInterval(pollingInterval);
-      pollingInterval = null;
-      graphContainer.style.display = 'none';
-      interfaceInfo.style.display = 'none';
-      noInterface.style.display = 'block';
-    }
-  });
-  refreshBtn.addEventListener('click', function(){
-    if(currentRouterId && currentInterfaceId){
-      loadTrafficData(currentRouterId, currentInterfaceId);
-    }
-  });
-  window.addEventListener('resize', function(){
-    if(graphContainer.style.display !== 'none'){
-      resizeCanvas();
-      drawGraph();
-    }
-  });
-  setTimeout(resizeCanvas, 100);
 })();
 </script>
 </body>

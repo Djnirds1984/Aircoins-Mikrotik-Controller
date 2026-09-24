@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/djnirds1984/aircoins-mikrotik-controller/database"
@@ -611,9 +612,82 @@ func (h *Handler) apiRouterInterfaces(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// apiRouterInterfaceTraffic samples one interface for the live traffic graph.
+// apiTrafficPoint is one sample of the rolling window the traffic graph
+// renders. The JSON names are the ones templates/dashboard.html reads.
+type apiTrafficPoint struct {
+	Timestamp time.Time `json:"timestamp"`
+	RxBytes   int64     `json:"rx_bytes"`
+	TxBytes   int64     `json:"tx_bytes"`
+	RxRate    int64     `json:"rx_rate"`
+	TxRate    int64     `json:"tx_rate"`
+}
+
+func toAPITrafficPoint(p InterfaceTraffic) apiTrafficPoint {
+	return apiTrafficPoint{
+		Timestamp: p.Timestamp, RxBytes: p.RxBytes, TxBytes: p.TxBytes,
+		RxRate: p.RxRate, TxRate: p.TxRate,
+	}
+}
+
+// trafficEntry is the rolling window of one router interface.
+type trafficEntry struct {
+	hist   InterfaceTrafficHistory
+	seenAt time.Time
+}
+
+// trafficStore keeps the last 60 samples per router and interface so every
+// poll returns history, not a single point: the browser replaces its whole
+// series from this window on each refresh. The zero value is ready to use and
+// windows untouched for 15 minutes are pruned, so a long lived controller
+// process does not accumulate stale interfaces forever.
+type trafficStore struct {
+	mu      sync.Mutex
+	entries map[string]*trafficEntry
+}
+
+// sample records one reading and returns a copy of the window for key. The
+// copy lets the response be built without holding the lock.
+func (s *trafficStore) sample(key string, now time.Time, stats InterfaceStats) []InterfaceTraffic {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.entries == nil {
+		s.entries = make(map[string]*trafficEntry)
+	}
+	cutoff := now.Add(-15 * time.Minute)
+	for k, e := range s.entries {
+		if e.seenAt.Before(cutoff) {
+			delete(s.entries, k)
+		}
+	}
+	e := s.entries[key]
+	if e == nil {
+		e = &trafficEntry{}
+		s.entries[key] = e
+	}
+	e.seenAt = now
+	e.hist.InterfaceID = stats.ID
+	e.hist.InterfaceName = stats.Name
+	e.hist.Points = append(e.hist.Points, InterfaceTraffic{
+		Timestamp: now,
+		RxBytes:   stats.RxBytes,
+		TxBytes:   stats.TxBytes,
+		RxRate:    stats.RxRate,
+		TxRate:    stats.TxRate,
+	})
+	if len(e.hist.Points) > 60 {
+		e.hist.Points = e.hist.Points[len(e.hist.Points)-60:]
+	}
+	points := make([]InterfaceTraffic, len(e.hist.Points))
+	copy(points, e.hist.Points)
+	return points
+}
+
+// apiRouterInterfaceTraffic samples one interface for the live traffic graph
+// and appends the reading to a per router interface window. The whole window
+// (up to 60 points; the dashboard polls every 2s) comes back as "points" so
+// the graph redraws with history even right after a page load.
 func (h *Handler) apiRouterInterfaceTraffic(w http.ResponseWriter, r *http.Request) {
-	_, client, ok := h.apiRouterLookup(w, r)
+	router, client, ok := h.apiRouterLookup(w, r)
 	if !ok {
 		return
 	}
@@ -630,11 +704,20 @@ func (h *Handler) apiRouterInterfaceTraffic(w http.ResponseWriter, r *http.Reque
 			routerErrorHint(err))
 		return
 	}
+	now := time.Now().UTC()
+	key := strconv.FormatInt(router.ID, 10) + "/" + iface
+	points := h.traffic.sample(key, now, stats)
+	out := make([]apiTrafficPoint, 0, len(points))
+	for _, p := range points {
+		out = append(out, toAPITrafficPoint(p))
+	}
 	h.writeAPIJSON(w, http.StatusOK, map[string]any{
-		"interface": toAPIInterface(stats),
-		"rx_rate":   stats.RxRate,
-		"tx_rate":   stats.TxRate,
-		"timestamp": time.Now().UTC(),
+		"interface":      toAPIInterface(stats),
+		"interface_name": stats.Name,
+		"points":         out,
+		"rx_rate":        stats.RxRate,
+		"tx_rate":        stats.TxRate,
+		"timestamp":      now,
 	})
 }
 

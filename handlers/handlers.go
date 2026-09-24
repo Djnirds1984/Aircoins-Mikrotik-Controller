@@ -75,6 +75,7 @@ type Handler struct {
 	cfg     Config
 	log     *slog.Logger
 	limiter *ipLimiter
+	traffic trafficStore
 }
 
 // New builds a Handler. The template set must already be parsed.

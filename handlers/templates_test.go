@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"html/template"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -36,6 +38,42 @@ func TestTemplatesParse(t *testing.T) {
 	for _, name := range partialNames {
 		if tmpl.Lookup(name) == nil {
 			t.Errorf("partial %q is missing", name)
+		}
+	}
+}
+
+// TestDashboardScriptStructure guards the traffic monitor script against the
+// corruption that once split it: a stray </script> closed the IIFE early and
+// left the fetch functions as dead HTML text the browser never ran, so the
+// graph could not load. There must be exactly one script block and it must
+// define every function the event handlers call.
+func TestDashboardScriptStructure(t *testing.T) {
+	raw, err := os.ReadFile("../templates/dashboard.html")
+	if err != nil {
+		t.Fatalf("read dashboard: %v", err)
+	}
+	body := string(raw)
+	open := strings.Index(body, "<script>")
+	end := strings.LastIndex(body, "</script>")
+	if open < 0 || end < 0 || end < open {
+		t.Fatal("dashboard script block is missing")
+	}
+	if n := strings.Count(body, "<script>"); n != 1 {
+		t.Errorf("found %d <script> tags, want exactly 1", n)
+	}
+	if n := strings.Count(body, "</script>"); n != 1 {
+		t.Errorf("found %d </script> tags, want exactly 1", n)
+	}
+	script := body[open : end+len("</script>")]
+	for _, want := range []string{
+		"function formatBytes",
+		"function formatRate",
+		"function drawGraph",
+		"async function loadInterfaces",
+		"async function loadTrafficData",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script block is missing %q", want)
 		}
 	}
 }
