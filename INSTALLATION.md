@@ -101,6 +101,10 @@ Copy the systemd unit from `install.sh` section 5, adjusting
   the installer used to pick up (fixed in the current `install.sh`, and the
   version is now sanitized). Use the latest script, or run
   `sudo AIRCOINS_VERSION=dev ./install.sh`.
+- HTTP 500 `template error` on `/routers/<id>`: the device-manager page used
+  to abort on its cached-data branch (a helper was called with an `int` where
+  it expects an `int64`). Fixed in the current source: rebuild from the latest
+  `main` and restart the service.
 - `Service unhealthy`: `journalctl -u aircoins -e`; check port clash
   (`ss -tlnp`) and `DB_PATH` writability.
 - Portal "not linked": set a router portal tag matching hotspot

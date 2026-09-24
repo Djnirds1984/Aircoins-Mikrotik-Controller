@@ -56,7 +56,15 @@ func humanBytes(n int64) string {
 }
 
 // humanCount groups thousands so large session counts stay readable.
-func humanCount(n int64) string {
+//
+// Templates reach it with an int ({{len .Clients}}) and with an int64 (a SQL
+// aggregate); the template language cannot convert between the two, so the
+// value arrives as any and is normalised here.
+func humanCount(value any) string {
+	n, ok := asInt64(value)
+	if !ok {
+		return noValue
+	}
 	neg := n < 0
 	if neg {
 		n = -n
@@ -73,6 +81,38 @@ func humanCount(n int64) string {
 		return "-" + joined
 	}
 	return joined
+}
+
+// asInt64 normalises the integer kinds a template can hand a helper: int for
+// len() and slice sizes, int64 for the counters the stores aggregate in SQL.
+func asInt64(value any) (int64, bool) {
+	switch n := value.(type) {
+	case int:
+		return int64(n), true
+	case int8:
+		return int64(n), true
+	case int16:
+		return int64(n), true
+	case int32:
+		return int64(n), true
+	case int64:
+		return n, true
+	case uint:
+		return int64(n), true
+	case uint8:
+		return int64(n), true
+	case uint16:
+		return int64(n), true
+	case uint32:
+		return int64(n), true
+	case uint64:
+		if n > math.MaxInt64 {
+			return 0, false
+		}
+		return int64(n), true
+	default:
+		return 0, false
+	}
 }
 
 // minutesLabel turns a minute allowance into "1h 30m".
@@ -122,19 +162,25 @@ func durationLabel(d time.Duration) string {
 }
 
 // timeLabel renders an optional timestamp in local time.
-func timeLabel(t *time.Time) string {
-	if t == nil || t.IsZero() {
+//
+// Templates hold two shapes of timestamp: a *time.Time for nullable columns
+// (routers.last_seen_at) and a time.Time for stored values (session rows), so
+// accept either instead of forcing a conversion the markup cannot express.
+func timeLabel(value any) string {
+	t, ok := asTime(value)
+	if !ok || t.IsZero() {
 		return noValue
 	}
 	return t.Local().Format("02 Jan 2006 15:04")
 }
 
 // sinceLabel renders "3 min ago" style relative times.
-func sinceLabel(t *time.Time) string {
-	if t == nil || t.IsZero() {
+func sinceLabel(value any) string {
+	t, ok := asTime(value)
+	if !ok || t.IsZero() {
 		return "never"
 	}
-	delta := time.Since(*t)
+	delta := time.Since(t)
 	if delta < 0 {
 		delta = -delta
 	}
@@ -147,6 +193,22 @@ func sinceLabel(t *time.Time) string {
 		return fmt.Sprintf("%d h ago", int(delta.Hours()))
 	default:
 		return fmt.Sprintf("%d d ago", int(delta.Hours()/24))
+	}
+}
+
+// asTime normalises the timestamp shapes templates pass to timeLabel and
+// sinceLabel: a time.Time value, or a *time.Time that may be nil.
+func asTime(value any) (time.Time, bool) {
+	switch t := value.(type) {
+	case time.Time:
+		return t, true
+	case *time.Time:
+		if t == nil {
+			return time.Time{}, false
+		}
+		return *t, true
+	default:
+		return time.Time{}, false
 	}
 }
 
