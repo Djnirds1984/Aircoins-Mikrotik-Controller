@@ -413,21 +413,36 @@ func TestParseRESTReply(t *testing.T) {
 }
 
 func TestRestCandidateSelection(t *testing.T) {
-	// Auto mode prefers REST over the legacy API, and remembers the winner.
+	// Auto mode is secure-only and must never send credentials to HTTP port 80.
 	router := database.Router{Host: "10.0.0.1", Port: 8728}
 	got := transportCandidates(router)
-	if len(got) != 4 {
-		t.Fatalf("auto mode produced %d candidates, want 4", len(got))
+	if len(got) != 3 {
+		t.Fatalf("auto mode produced %d candidates, want 3", len(got))
 	}
-	if got[0].mode != database.TransportRESTSsl || got[1].mode != database.TransportREST {
-		t.Errorf("auto order starts with %s, %s", got[0].mode, got[1].mode)
+	want := []string{database.TransportRESTSsl, database.TransportAPISSL, database.TransportAPI}
+	for index, mode := range want {
+		if got[index].mode != mode {
+			t.Errorf("auto candidate %d = %s, want %s", index, got[index].mode, mode)
+		}
+		if got[index].port == 80 {
+			t.Errorf("auto mode probes plain HTTP on port 80 (%s)", got[index].mode)
+		}
 	}
 
-	// A router that answered over the API is tried there first next time.
-	router.LastTransport = database.TransportAPI
+	// A remembered HTTP REST success must not override the auto-mode safeguard.
+	router.LastTransport = database.TransportREST
 	got = transportCandidates(router)
-	if got[0].mode != database.TransportAPI {
-		t.Errorf("last transport not honoured: first candidate is %s", got[0].mode)
+	for _, candidate := range got {
+		if candidate.mode == database.TransportREST {
+			t.Fatal("auto mode reused the remembered plain HTTP REST transport")
+		}
+	}
+
+	// A router that answered securely over the API is tried there first next time.
+	router.LastTransport = database.TransportAPISSL
+	got = transportCandidates(router)
+	if got[0].mode != database.TransportAPISSL {
+		t.Errorf("last secure transport not honoured: first candidate is %s", got[0].mode)
 	}
 
 	// An explicit mode yields exactly one candidate, with the right default port.
@@ -435,6 +450,12 @@ func TestRestCandidateSelection(t *testing.T) {
 	got = transportCandidates(router)
 	if len(got) != 1 || got[0].mode != database.TransportRESTSsl || got[0].port != 443 {
 		t.Errorf("explicit rest-ssl = %#v", got)
+	}
+	// HTTP remains available when the operator deliberately selects it.
+	router.Transport = database.TransportREST
+	got = transportCandidates(router)
+	if len(got) != 1 || got[0].mode != database.TransportREST || got[0].port != 80 {
+		t.Errorf("explicit plain REST = %#v", got)
 	}
 	router.Transport = database.TransportREST
 	router.RestPort = 8080

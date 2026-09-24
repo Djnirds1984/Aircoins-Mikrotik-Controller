@@ -43,13 +43,13 @@
           <div class="field">
             <label for="transport">Connection method</label>
             <select id="transport" name="transport">
-              <option value="auto"{{if eq .Form.Transport "auto"}} selected{{end}}>Auto (try REST, then API)</option>
+              <option value="auto"{{if eq .Form.Transport "auto"}} selected{{end}}>Auto (secure REST, then API)</option>
               <option value="rest-ssl"{{if eq .Form.Transport "rest-ssl"}} selected{{end}}>REST over HTTPS (www-ssl)</option>
               <option value="rest"{{if eq .Form.Transport "rest"}} selected{{end}}>REST over HTTP (www)</option>
               <option value="api"{{if eq .Form.Transport "api"}} selected{{end}}>API (8728)</option>
               <option value="api-ssl"{{if eq .Form.Transport "api-ssl"}} selected{{end}}>API-SSL (8729)</option>
             </select>
-            <span class="muted" style="font-size:.78rem">REST needs only the www or www-ssl service; the legacy API needs /ip service api.</span>
+            <span class="muted" style="font-size:.78rem">Auto never probes plain HTTP on port 80. REST over HTTP must be selected explicitly.</span>
           </div>
           <div class="field">
             <label for="rest_port">Web port for REST (optional)</label>

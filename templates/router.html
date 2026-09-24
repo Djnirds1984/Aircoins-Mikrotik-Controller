@@ -334,7 +334,7 @@
           <div class="field">
             <label for="etransport">Connection method</label>
             <select id="etransport" name="transport">
-              <option value="auto"{{if eq .Form.Transport "auto"}} selected{{end}}>Auto (try REST, then API)</option>
+              <option value="auto"{{if eq .Form.Transport "auto"}} selected{{end}}>Auto (secure REST, then API)</option>
               <option value="rest-ssl"{{if eq .Form.Transport "rest-ssl"}} selected{{end}}>REST over HTTPS (www-ssl)</option>
               <option value="rest"{{if eq .Form.Transport "rest"}} selected{{end}}>REST over HTTP (www)</option>
               <option value="api"{{if eq .Form.Transport "api"}} selected{{end}}>API (8728)</option>

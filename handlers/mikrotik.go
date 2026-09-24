@@ -270,10 +270,13 @@ func newTransport(client *MikrotikClient, candidate transportCandidate) transpor
 
 // transportCandidates lists the protocols to try, in order, for one router.
 //
-// An explicit mode yields a single candidate. Auto mode tries the transport
-// that worked last time first - so a healthy router is never probed twice -
-// then REST before the legacy API, because REST only needs the www/www-ssl
-// service an operator usually has already enabled.
+// An explicit mode yields a single candidate. Auto mode tries the secure
+// transport that worked last time first, so a healthy router is not probed
+// twice, then HTTPS REST and the binary API transports. Plain HTTP REST is
+// deliberately excluded: a hostname can expose an unrelated web service on
+// port 80, and a remote controller must not send credentials to it by accident.
+// Operators who know the www service is the desired endpoint can still select
+// REST over HTTP explicitly.
 func transportCandidates(router database.Router) []transportCandidate {
 	rest := func(tls bool) transportCandidate {
 		port := router.RestPort
@@ -315,9 +318,11 @@ func transportCandidates(router database.Router) []transportCandidate {
 		return []transportCandidate{rest(true)}
 	}
 
-	order := []transportCandidate{rest(true), rest(false), api(true), api(false)}
+	// Auto mode is secure-only: never probe an unrelated HTTP service on port 80,
+	// even if an older run happened to remember that transport succeeding.
+	order := []transportCandidate{rest(true), api(true), api(false)}
 	last := router.LastTransport
-	if !database.ValidTransport(last) || last == database.TransportAuto {
+	if last == database.TransportREST || !database.ValidTransport(last) || last == database.TransportAuto {
 		last = ""
 	}
 	out := make([]transportCandidate, 0, len(order))
