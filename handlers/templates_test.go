@@ -71,6 +71,13 @@ func TestDashboardScriptStructure(t *testing.T) {
 		"function drawGraph",
 		"async function loadInterfaces",
 		"async function loadTrafficData",
+		// Guards the "dropdown not clickable" regression: a restored router
+		// selection must bootstrap the interface list on page load, stale
+		// responses must be dropped, and a failed load must leave Refresh now
+		// enabled so the operator can retry.
+		"if(routerSelect.value)",
+		"currentRouterId !== routerId",
+		"refreshBtn.disabled = false;",
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("script block is missing %q", want)

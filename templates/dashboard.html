@@ -401,6 +401,12 @@ canvas#trafficCanvas{
     currentRouterId = this.value;
     currentInterfaceId = null;
     trafficData = [];
+    if(pollingInterval){ clearInterval(pollingInterval); pollingInterval = null; }
+    graphContainer.style.display = 'none';
+    interfaceInfo.style.display = 'none';
+    loadingGraph.style.display = 'none';
+    noInterface.style.display = 'block';
+    graphStatus.textContent = '';
     loadInterfaces(currentRouterId);
   });
 
@@ -424,6 +430,10 @@ canvas#trafficCanvas{
   refreshBtn.addEventListener('click', function(){
     if(currentRouterId && currentInterfaceId){
       loadTrafficData(currentRouterId, currentInterfaceId);
+    }else if(currentRouterId){
+      // No interface chosen (or the list previously failed to load): retry
+      // the interface list so a transient error is never a dead end.
+      loadInterfaces(currentRouterId);
     }
   });
 
@@ -435,6 +445,15 @@ canvas#trafficCanvas{
   });
 
   setTimeout(resizeCanvas, 100);
+
+  // The browser can restore a select's previous value without firing
+  // 'change' (form state restoration on reload), which left the interface
+  // dropdown disabled after a refresh even though a router looked selected.
+  // Seed the state from the markup and load immediately in that case.
+  if(routerSelect.value){
+    currentRouterId = routerSelect.value;
+    loadInterfaces(currentRouterId);
+  }
 
   async function loadInterfaces(routerId){
     if(!routerId){
@@ -448,18 +467,35 @@ canvas#trafficCanvas{
     }
     interfaceSelect.innerHTML = '<option value="">Loading...</option>';
     interfaceSelect.disabled = true;
+    refreshBtn.disabled = true;
     try{
       const resp = await fetch('/api/v1/routers/' + routerId + '/interfaces');
-      if(!resp.ok) throw new Error('Failed to load interfaces');
+      if(!resp.ok){
+        // The API answers failures with {code, message}; surface that hint
+        // (e.g. "router unreachable") instead of a generic string.
+        const body = await resp.json().catch(function(){ return null; });
+        throw new Error((body && body.message) ||
+          ('Failed to load interfaces (HTTP ' + resp.status + ')'));
+      }
       const data = await resp.json();
+      // Drop stale answers: a newer router selection may have started while
+      // this request was in flight, and its options must win.
+      if(currentRouterId !== routerId) return;
       interfaceSelect.innerHTML = '<option value="">— Select an interface —</option>';
-      for(const iface of data.interfaces){
+      const list = Array.isArray(data.interfaces) ? data.interfaces : [];
+      for(const iface of list){
         interfaceSelect.innerHTML += '<option value="' + iface.id + '">' + iface.name + ' (' + iface.type + ')</option>';
       }
       interfaceSelect.disabled = false;
       refreshBtn.disabled = false;
+      graphStatus.textContent = list.length ? '' : 'This router reported no interfaces';
     }catch(err){
+      if(currentRouterId !== routerId) return;
       interfaceSelect.innerHTML = '<option value="">Error loading interfaces</option>';
+      interfaceSelect.disabled = true;
+      // Keep Refresh now clickable so the operator can retry without having
+      // to re-select the router.
+      refreshBtn.disabled = false;
       graphStatus.textContent = 'Error: ' + err.message;
     }
   }
