@@ -29,7 +29,7 @@ Open `http://localhost:8080/` (dashboard), `/routers`,
 | `DEFAULT_REDIRECT` | — | Portal fallback when `link-orig` is absent |
 | `API_TIMEOUT` | `12s` | Per-call RouterOS timeout |
 | `SECURE_COOKIES` | — | Set `1` behind HTTPS |
-| `VERSION` | `dev` | Footer version (`-ldflags "-X main.version=1.0.0"`) |
+| `VERSION` | `dev` | Build-time footer version only (`-ldflags "-X main.version=1.0.0"`; `install.sh` uses `AIRCOINS_VERSION=1.0.0`) |
 
 Router API passwords are AES-256-GCM encrypted at rest; without the
 master key a stolen `.db` file is useless.

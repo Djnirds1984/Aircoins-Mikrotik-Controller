@@ -10,8 +10,9 @@ mini PCs on Ubuntu 22.04/24.04 or Debian 11/12.
 
 What `install.sh` does: detects CPU arch (Go amd64/arm64/armv6l),
 board model, OS/Armbian flag, RAM/cores; installs `curl git`,
-`build-essential`, `ufw/iptables`; reuses distro Go ≥ 1.23 or fetches
-the official tarball for the detected arch (SHA256-checked); adds
+`build-essential`, `ufw/iptables`; reuses distro Go when it satisfies the
+version `go.mod` asks for (currently 1.26.5) and otherwise fetches that
+exact official tarball for the detected arch (SHA256-checked); adds
 swap on ≤ 1 GB boards; creates the `aircoins` user, builds
 `CGO_ENABLED=0` (pure-Go SQLite, no libsqlite3), installs a hardened
 systemd unit, writes `/etc/aircoins/aircoins.env`, opens the firewall,
@@ -36,6 +37,13 @@ sudo ./install.sh --uninstall
 
 Flags: `--port --addr --install-dir --data-dir --user --portal-name`
 `--go-version --repo --branch --skip-firewall --no-service --uninstall`.
+
+The footer version comes from `AIRCOINS_VERSION`, else `git describe`,
+else `dev`:
+
+```bash
+sudo AIRCOINS_VERSION=1.2.3 ./install.sh
+```
 
 ## B. Board-specific notes
 
@@ -72,7 +80,7 @@ unit `/etc/systemd/system/aircoins.service`.
 ## D. Manual install (no script)
 
 ```bash
-go version            # need >= 1.23 for your arch, https://go.dev/dl/
+go version            # need the version in go.mod (>= 1.26), https://go.dev/dl/
 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o aircoins-controller .
 ADDR=:8080 DB_PATH=/var/lib/aircoins/aircoins.db \
 SECRET_KEY_PATH=/var/lib/aircoins/secret.key \
@@ -87,7 +95,12 @@ Copy the systemd unit from `install.sh` section 5, adjusting
 - `Unsupported CPU architecture`: use a 64-bit image (x86_64/aarch64).
 - Build OOM on 512 MB: re-run, installer adds `/swapfile` + `-p=2`.
 - Distro Go too old: installer fetches the official tarball
-  (`--go-version`, default `1.23.5`).
+  (`--go-version`, default = the version in `go.mod`).
+- Build aborts with `usage: link [options] main.o`: the version handed to
+  `-ldflags` contained spaces — Debian ships `VERSION="13 (trixie)"`, which
+  the installer used to pick up (fixed in the current `install.sh`, and the
+  version is now sanitized). Use the latest script, or run
+  `sudo AIRCOINS_VERSION=dev ./install.sh`.
 - `Service unhealthy`: `journalctl -u aircoins -e`; check port clash
   (`ss -tlnp`) and `DB_PATH` writability.
 - Portal "not linked": set a router portal tag matching hotspot

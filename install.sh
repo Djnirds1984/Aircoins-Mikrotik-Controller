@@ -55,6 +55,8 @@ while [[ $# -gt 0 ]]; do
       echo "Options: --port --addr --install-dir --data-dir --user"
       echo "  --portal-name --go-version --repo --branch --skip-firewall"
       echo "  --no-service --uninstall -h/--help"
+      echo "Env: AIRCOINS_VERSION=1.2.3 (footer version), GO_MIRROR,"
+      echo "  GOCACHE, GOMODCACHE"
       exit 0 ;;
     *) die "Unknown option: $1 (see --help)" ;;
   esac
@@ -87,13 +89,28 @@ fi
 BOARD="$(echo "$BOARD" | xargs || true)"
 [[ -n "$BOARD" ]] || BOARD="generic x86 mini PC"
 
+# read_os_release KEY -> prints the value of KEY from /etc/os-release.
+# It is read inside a subshell on purpose: sourcing os-release in this shell
+# defines NAME/ID/VERSION/..., and Debian ships VERSION="13 (trixie)". That
+# leaked into $VERSION and corrupted the -ldflags version below.
+read_os_release() {
+  (
+    set +u
+    # shellcheck disable=SC1091
+    . /etc/os-release 2>/dev/null || :
+    printf '%s' "${!1:-}"
+  )
+}
+
 IS_ARMBIAN=0
 PRETTY_OS="$(uname -s)"
 if [[ -r /etc/os-release ]]; then
-  # shellcheck disable=SC1091
-  . /etc/os-release
-  PRETTY_OS="${PRETTY_NAME:-$PRETTY_OS}"
-  case "${ID:-}${ID_LIKE:-}" in
+  PRETTY_OS="$(read_os_release PRETTY_NAME)"
+  [[ -n "$PRETTY_OS" ]] || PRETTY_OS="$(uname -s)"
+  # Armbian images report ID=debian, so match ID, ID_LIKE and PRETTY_NAME.
+  OS_HINTS="$(printf '%s %s %s' "$(read_os_release ID)" "$(read_os_release ID_LIKE)" "$PRETTY_OS" \
+    | tr '[:upper:]' '[:lower:]')"
+  case "$OS_HINTS" in
     *armbian*) IS_ARMBIAN=1 ;;
   esac
 fi
@@ -210,6 +227,16 @@ install_go_tarball() {
   rm -f "/tmp/${file}" "/tmp/${file}.sha256"
 }
 
+# go.mod (e.g. "go 1.26.5") sets the floor: raise the minimum and download
+# that exact tarball when it is newer than the hardcoded default above.
+GOMOD_GO_VERSION="$(awk '$1 == "go" { print $2; exit }' "$SRC_DIR/go.mod" 2>/dev/null || true)"
+if [[ -n "$GOMOD_GO_VERSION" ]] && ! version_ge "${MIN_GO_MAJOR}.${MIN_GO_MINOR}" "$GOMOD_GO_VERSION"; then
+  MIN_GO_MAJOR="${GOMOD_GO_VERSION%%.*}"
+  MIN_GO_MINOR="$(printf '%s' "${GOMOD_GO_VERSION#*.}" | cut -d. -f1)"
+  GO_VERSION="$GOMOD_GO_VERSION"
+  log "go.mod requires Go $GOMOD_GO_VERSION; using it as the minimum."
+fi
+
 if go_is_ok; then
   log "Go already present: $(go version)"
 else
@@ -239,9 +266,21 @@ mkdir -p "$INSTALL_DIR" "$DATA_DIR" /etc/aircoins
 chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR"
 chmod 750 "$DATA_DIR"
 
-VERSION_STR="${VERSION:-dev}"
-if [[ "$VERSION_STR" == "dev" ]] && [[ -d "$SRC_DIR/.git" ]]; then
+# Footer version: AIRCOINS_VERSION wins, then the git description, then "dev".
+VERSION_STR="${AIRCOINS_VERSION:-}"
+if [[ -z "$VERSION_STR" ]] && [[ -d "$SRC_DIR/.git" ]]; then
   VERSION_STR="$(git -C "$SRC_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)"
+fi
+[[ -n "$VERSION_STR" ]] || VERSION_STR="dev"
+# go build splits -ldflags on whitespace and forwards every token to the
+# linker, so a version containing a space (Debian's "13 (trixie)") turns into
+# a stray linker argument and aborts with "usage: link [options] main.o".
+# Keep only characters that are safe inside a single -ldflags token.
+SAFE_VERSION="$(printf '%s' "$VERSION_STR" | tr -c 'A-Za-z0-9._+-' '-' \
+  | sed -e 's/-\{2,\}/-/g' -e 's/^[.-]*//' -e 's/[.-]*$//')"
+if [[ -n "$SAFE_VERSION" && "$SAFE_VERSION" != "$VERSION_STR" ]]; then
+  warn "Version '$VERSION_STR' is not ldflags-safe; using '$SAFE_VERSION'."
+  VERSION_STR="$SAFE_VERSION"
 fi
 
 log "Building $APP_NAME ($VERSION_STR) for linux/$GOARCH ..."
