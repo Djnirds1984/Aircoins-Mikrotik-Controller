@@ -30,6 +30,12 @@ var templateFS embed.FS
 var version = "dev"
 
 func main() {
+	// --version is handled before run so install.sh can prove which binary was
+	// installed without starting the server or opening the database.
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Println(version)
+		return
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "aircoins-controller:", err)
 		os.Exit(1)

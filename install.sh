@@ -373,14 +373,25 @@ fi
 
 # --- 7. Enable, start, smoke-test ----------------------------------------
 if (( ENABLE_SERVICE )); then
-  log "Enabling and starting $SERVICE_NAME ..."
+  log "Enabling and restarting $SERVICE_NAME ..."
   systemctl daemon-reload
-  systemctl enable --now "$SERVICE_NAME"
-  sleep 3
+  systemctl enable "$SERVICE_NAME"
+  # `enable --now` does not restart an already active unit, which leaves the
+  # previous binary running after an upgrade. Always restart so the executable
+  # just installed is the process serving requests.
+  systemctl restart "$SERVICE_NAME"
+  if ! systemctl is-active --quiet "$SERVICE_NAME"; then
+    warn "Service did not become active; recent logs:"
+    journalctl -u "$SERVICE_NAME" --no-pager -n 30 2>/dev/null || true
+    die "Failed to start $SERVICE_NAME."
+  fi
   systemctl --no-pager --lines=20 status "$SERVICE_NAME" || true
 else
   log "Skipping systemd enable (--no-service). Run: $INSTALL_DIR/$APP_NAME"
 fi
+
+INSTALLED_VERSION="$($INSTALL_DIR/$APP_NAME --version 2>/dev/null || true)"
+[[ -n "$INSTALLED_VERSION" ]] || INSTALLED_VERSION="version unavailable"
 
 HOST_PART="${ADDR%%:*}"
 if [[ "$HOST_PART" == "0.0.0.0" || -z "$HOST_PART" ]]; then HOST_PART="127.0.0.1"; fi
@@ -398,7 +409,7 @@ cat <<EOF
 Dashboard : http://${HOST_PART}:${LISTEN_PORT}/
 Portal    : http://${HOST_PART}:${LISTEN_PORT}/portal/login
 Health    : http://${HOST_PART}:${LISTEN_PORT}/healthz
-Binary    : $INSTALL_DIR/$APP_NAME
+Binary    : $INSTALL_DIR/$APP_NAME ($INSTALLED_VERSION)
 Data      : $DATA_DIR/aircoins.db (+ secret.key)
 Config    : $ENV_FILE
 Service   : systemctl status $SERVICE_NAME
