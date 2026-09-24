@@ -16,7 +16,10 @@ package handlers
 //   - timeouts accept the RouterOS symbolic value "none" to clear them.
 //
 // A property the local build does not know about is rejected by RouterOS with
-// "unknown parameter", which routerErrorHint() reports to the operator.
+// "unknown parameter"; addROSObject and setROSObject drop that one argument
+// and retry (logging the drop at Warn so the operator knows the setting was
+// not applied) so a version-skewed property cannot block the whole write, and
+// routerErrorHint() still explains whatever error is left.
 
 import (
 	"context"
@@ -126,26 +129,99 @@ func rosFlagSet(row map[string]string, name string) bool {
 // Shared CRUD plumbing
 // ---------------------------------------------------------------------------
 
-// addROSObject creates an object and returns the id RouterOS assigned to it.
-func (c *MikrotikClient) addROSObject(ctx context.Context, menu string, args []string) (string, error) {
-	reply, err := c.Run(ctx, menu+"/add", args...)
-	if err != nil {
-		return "", err
+// stripUnknownParameter removes the argument RouterOS refused in an
+// "unknown parameter <name>" rejection. It returns the remaining arguments,
+// the name that was dropped and whether anything was actually removed: when
+// the error is about something else, or names a property this request never
+// sent, ok is false and the caller must surface the original error unchanged.
+// ok guarantees the returned slice is shorter, which is what bounds the retry
+// loops in addROSObject and setROSObject.
+func stripUnknownParameter(args []string, err error) ([]string, string, bool) {
+	name := unknownParameterName(err.Error())
+	if name == "" {
+		return args, "", false
 	}
-	return reply.ID(), nil
+	prefix := "=" + name + "="
+	kept := make([]string, 0, len(args))
+	removed := false
+	for _, arg := range args {
+		if !removed && strings.HasPrefix(arg, prefix) {
+			removed = true
+			continue
+		}
+		kept = append(kept, arg)
+	}
+	if !removed {
+		return args, "", false
+	}
+	return kept, name, true
 }
 
-// setROSObject updates a single object by id.
+// unknownParameterName digs the property name out of device prose such as
+// "unknown parameter comment Bad Request at host:port (/ip/hotspot/add)" and
+// returns "" when the message is about something else. Separator and quote
+// styles vary between the binary API trap and the REST detail, so each word
+// after the marker is trimmed before it is taken as the name.
+func unknownParameterName(message string) string {
+	const marker = "unknown parameter"
+	lowered := strings.ToLower(message)
+	at := strings.Index(lowered, marker)
+	if at < 0 {
+		return ""
+	}
+	for _, word := range strings.Fields(lowered[at+len(marker):]) {
+		if name := strings.Trim(word, ":='\"`.,()"); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+// addROSObject creates an object and returns the id RouterOS assigned to it.
+//
+// RouterOS builds differ in which properties a menu accepts. When the device
+// answers "unknown parameter <name>", the named argument is dropped and the
+// command retried, so one property this build does not know cannot block the
+// whole write; the drop is logged because the setting was not applied.
+func (c *MikrotikClient) addROSObject(ctx context.Context, menu string, args []string) (string, error) {
+	for {
+		reply, err := c.Run(ctx, menu+"/add", args...)
+		if err == nil {
+			return reply.ID(), nil
+		}
+		stripped, name, ok := stripUnknownParameter(args, err)
+		if !ok || len(stripped) == 0 {
+			return "", err
+		}
+		c.log.Warn("device rejected a parameter, retrying without it",
+			"menu", menu, "parameter", name, "error", err)
+		args = stripped
+	}
+}
+
+// setROSObject updates a single object by id. Like addROSObject it retries
+// without a property this build reports as unknown.
 func (c *MikrotikClient) setROSObject(ctx context.Context, menu, id string, args []string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return errors.New("handlers: an object id is required")
 	}
-	full := make([]string, 0, len(args)+1)
-	full = append(full, "=.id="+id)
-	full = append(full, args...)
-	_, err := c.Run(ctx, menu+"/set", full...)
-	return err
+	for {
+		full := make([]string, 0, len(args)+1)
+		full = append(full, "=.id="+id)
+		full = append(full, args...)
+		_, err := c.Run(ctx, menu+"/set", full...)
+		if err == nil {
+			return nil
+		}
+		stripped, name, ok := stripUnknownParameter(args, err)
+		if !ok || len(stripped) == 0 {
+			return err
+		}
+		c.log.Warn("device rejected a parameter, retrying without it",
+			"menu", menu, "parameter", name, "error", err)
+		args = stripped
+	}
 }
 
 // removeROSObject deletes an object, treating an already missing object as

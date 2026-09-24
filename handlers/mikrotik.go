@@ -525,6 +525,13 @@ func (c *MikrotikClient) classify(command string, err error) error {
 	if err == nil {
 		return nil
 	}
+	// The transports already return a decorated *RouterError carrying the
+	// right sentinel; wrapping it again would repeat " at <endpoint>
+	// (<command>)" in every log line and flash message.
+	var decorated *RouterError
+	if errors.As(err, &decorated) {
+		return err
+	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return &RouterError{Endpoint: c.endpoint, Command: command,
 			Message: "the request was cancelled or timed out", Sentinel: ErrRouterTimeout, cause: err}
