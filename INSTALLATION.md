@@ -64,8 +64,17 @@ in `/etc/aircoins/aircoins.env`, then `systemctl restart aircoins`.
 
 1. `systemctl status aircoins`, `journalctl -u aircoins -f`.
 2. Open `http://<board-ip>:8080/` → dashboard, `/healthz` → `ok`.
-3. `/routers`: register each MikroTik (API `8728`/`8729`), allow the
-   board IP under RouterOS `/ip service`.
+3. `/routers`: register each MikroTik. Pick the **Connection method** that
+   matches your RouterOS setup:
+   - `REST over HTTPS (www-ssl)` / `REST over HTTP (www)` — the v7 REST API,
+     served by the `www-ssl` / `www` service. Leave **Web port for REST** empty
+     unless the service listens somewhere other than 443/80.
+   - `API (8728)` / `API-SSL (8729)` — the legacy binary API (`/ip service
+     api`), kept for RouterOS 6 and older setups.
+   - `Auto` tries REST first, then the binary API, and remembers whichever
+     answered, so later page loads connect straight away.
+
+   Allow the board IP under RouterOS `/ip service` either way.
 4. Point the hotspot login page at
    `http://<board-ip>:8080/portal/login?mac=$(mac)&ip=$(ip)&...`
    (full snippet in `README.md`).
@@ -109,7 +118,9 @@ Copy the systemd unit from `install.sh` section 5, adjusting
   (`ss -tlnp`) and `DB_PATH` writability.
 - Portal "not linked": set a router portal tag matching hotspot
   `server-name`, or tick Default portal.
-- Router offline: check IP/API port, `/ip service` allowed address,
-  API user group, firewall.
+- Router offline: check IP/port, `/ip service` allowed address, API user group,
+  firewall. With `REST` selected the service must be `www` (port 80) or
+  `www-ssl` (port 443) — `/ip service print` shows which are enabled. `Auto`
+  accepts either protocol, so it is the quickest way to find out.
 - Lost `secret.key`: router passwords are unrecoverable, re-enter them.
 

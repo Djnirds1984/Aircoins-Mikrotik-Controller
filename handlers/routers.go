@@ -53,6 +53,11 @@ type routerForm struct {
 	UseTLS        bool
 	VerifyTLS     bool
 	DefaultPortal bool
+	// Transport selects the protocol: auto, api, api-ssl, rest or rest-ssl.
+	Transport string
+	// RestPort is the www/www-ssl port used by the REST transports. Empty means
+	// 443 for HTTPS and 80 for plain HTTP.
+	RestPort string
 
 	Errors map[string]string
 }
@@ -60,8 +65,9 @@ type routerForm struct {
 // newRouterForm returns an empty form with sensible defaults.
 func newRouterForm() *routerForm {
 	return &routerForm{
-		Port:   "8728",
-		Errors: map[string]string{},
+		Port:      "8728",
+		Transport: database.TransportAuto,
+		Errors:    map[string]string{},
 	}
 }
 
@@ -79,7 +85,22 @@ func routerFormFromRequest(r *http.Request) *routerForm {
 	form.UseTLS = r.PostFormValue("use_tls") != ""
 	form.VerifyTLS = r.PostFormValue("verify_tls") != ""
 	form.DefaultPortal = r.PostFormValue("default_portal") != ""
+	form.Transport = database.NormalizeTransport(r.PostFormValue("transport"))
+	form.RestPort = strings.TrimSpace(r.PostFormValue("rest_port"))
 	return form
+}
+
+// restPort parses the optional www/www-ssl port. Zero is valid and means the
+// protocol default (80 for http, 443 for https).
+func (f *routerForm) restPort() int {
+	if strings.TrimSpace(f.RestPort) == "" {
+		return 0
+	}
+	port, err := strconv.Atoi(f.RestPort)
+	if err != nil || port < 0 || port > 65535 {
+		return -1
+	}
+	return port
 }
 
 func (f *routerForm) port() int {
@@ -112,6 +133,9 @@ func (f *routerForm) validate(requirePassword bool) bool {
 	if len(f.PortalTag) > 40 {
 		f.Errors["portal_tag"] = "Keep the portal tag under 40 characters."
 	}
+	if f.restPort() < 0 {
+		f.Errors["rest_port"] = "Leave the web port empty for the default (80, or 443 with HTTPS)."
+	}
 	return len(f.Errors) == 0
 }
 
@@ -129,6 +153,8 @@ func (f *routerForm) router() database.Router {
 		PortalTag:     f.PortalTag,
 		DefaultPortal: f.DefaultPortal,
 		Notes:         f.Notes,
+		Transport:     f.Transport,
+		RestPort:      f.restPort(),
 	}
 }
 
@@ -146,6 +172,11 @@ func routerFormFromRouter(router database.Router) *routerForm {
 	form.UseTLS = router.UseTLS
 	form.VerifyTLS = router.VerifyTLS
 	form.DefaultPortal = router.DefaultPortal
+	form.Transport = router.TransportMode()
+	form.RestPort = ""
+	if router.RestPort > 0 {
+		form.RestPort = strconv.Itoa(router.RestPort)
+	}
 	return form
 }
 

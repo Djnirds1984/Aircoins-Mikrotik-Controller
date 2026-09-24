@@ -57,6 +57,9 @@ func sampleRouter() database.Router {
 		PortalTag:     "hq",
 		DefaultPortal: true,
 		Notes:         "installed 2026-09-21",
+		Transport:     database.TransportAuto,
+		RestPort:      443,
+		LastTransport: database.TransportRESTSsl,
 		LastStatus:    database.RouterStatusOnline,
 		LastLatencyMS: 12,
 		LastSeenAt:    &seen,
@@ -264,6 +267,16 @@ func TestPageTemplatesRender(t *testing.T) {
 			page: samplePage("Routers", "routers"), Form: newRouterForm(),
 			Routers: summaries, Stats: stats,
 		}},
+		{"router detail", "router.html", routerPageForTransport(database.TransportAuto)},
+		{"router detail rest-ssl", "router.html", routerPageForTransport(database.TransportRESTSsl)},
+		{"router detail rest", "router.html", routerPageForTransport(database.TransportREST)},
+		{"router detail api", "router.html", routerPageForTransport(database.TransportAPI)},
+		{"router detail api-ssl", "router.html", routerPageForTransport(database.TransportAPISSL)},
+
+		{"router inventory", "routers.html", &routersPage{
+			page: samplePage("Routers", "routers"), Form: newRouterForm(),
+			Routers: summaries, Stats: stats,
+		}},
 		{"router inventory errors", "routers.html", &routersPage{
 			page: samplePage("Routers", "routers"), Form: invalidForm,
 		}},
@@ -298,6 +311,28 @@ func TestPageTemplatesRender(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			renderPage(t, tc.tmpl, tc.data)
 		})
+	}
+}
+
+// routerPageForTransport builds the device manager for one connection method, so
+// every branch of the transport selector and the connection details list is
+// rendered by the suite.
+func routerPageForTransport(transport string) *routerPage {
+	router := sampleRouter()
+	router.Transport = transport
+	if transport == database.TransportREST || transport == database.TransportRESTSsl {
+		router.LastTransport = transport
+		router.RestPort = 0
+	}
+	return &routerPage{
+		page:          samplePage("Router", "routers"),
+		Router:        router,
+		Live:          true,
+		Info:          DeviceInfo{Identity: "Tolosa", Version: "7.16.2", BoardName: "RB5009UG+S+"},
+		Clients:       []HotspotActive{{User: "dave", Address: "10.0.0.5", Uptime: "2h", BytesIn: 1024, BytesOut: 2048, LoginBy: "voucher"}},
+		CachedClients: []database.Session{{ID: 1, RouterID: 1, Username: "dave", Address: "10.0.0.5", MACAddress: "AA:BB:CC:00:00:05", LoginBy: "voucher", Server: "hotspot1", Uptime: "2h", StartedAt: sampleTime, LastSeenAt: sampleTime}},
+		Form:          routerFormFromRouter(router),
+		VoucherForm:   newVoucherForm(router.ID),
 	}
 }
 

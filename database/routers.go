@@ -16,6 +16,41 @@ const (
 	RouterStatusOffline = "offline"
 )
 
+// Transport modes. The controller speaks two protocols: the legacy binary API
+// ("api" on TCP 8728, "api-ssl" on 8729) and the RouterOS v7 REST API ("rest"
+// over HTTP, "rest-ssl" over HTTPS, served by the www/www-ssl service).
+// "auto" probes the candidates and remembers the winner in last_transport.
+const (
+	TransportAuto    = "auto"
+	TransportAPI     = "api"
+	TransportAPISSL  = "api-ssl"
+	TransportREST    = "rest"
+	TransportRESTSsl = "rest-ssl"
+)
+
+// ValidTransport reports whether mode names a transport the controller knows.
+func ValidTransport(mode string) bool {
+	switch mode {
+	case TransportAuto, TransportAPI, TransportAPISSL, TransportREST, TransportRESTSsl:
+		return true
+	default:
+		return false
+	}
+}
+
+// NormalizeTransport maps unknown values - including the empty string - onto
+// auto, so a stale form value can never break a connection.
+func NormalizeTransport(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if ValidTransport(mode) {
+		return mode
+	}
+	return TransportAuto
+}
+
+// TransportMode is the normalised transport setting of a router.
+func (r Router) TransportMode() string { return NormalizeTransport(r.Transport) }
+
 // ErrNotFound is returned when a lookup matches no row.
 var ErrNotFound = errors.New("database: not found")
 
@@ -30,9 +65,20 @@ type Router struct {
 	// RouterOS client, never rendered by a template.
 	Password string
 	UseTLS   bool
-	// VerifyTLS enforces certificate verification for API-SSL connections.
+	// VerifyTLS enforces certificate verification for the TLS transports
+	// (api-ssl and rest-ssl). MikroTik ships a self signed certificate by
+	// default, so this is opt-in.
 	VerifyTLS bool
-	Location  string
+	// Transport selects the protocol used to talk to the device: auto, api,
+	// api-ssl, rest or rest-ssl. The empty string behaves like auto.
+	Transport string
+	// RestPort is the www/www-ssl port used by the REST transports. Zero uses
+	// 443 for HTTPS and 80 for plain HTTP.
+	RestPort int
+	// LastTransport records the transport that last connected successfully, so
+	// auto mode can try it first instead of probing every protocol again.
+	LastTransport string
+	Location      string
 	// PortalTag matches the hotspot "server-name"/NAS identifier so the captive
 	// portal can route a login request to the right device.
 	PortalTag string
@@ -72,8 +118,8 @@ type RouterStore struct{ db *DB }
 
 const routerColumns = `
     id, name, host, port, username, password, use_tls, verify_tls, location,
-    portal_tag, is_default_portal, notes, last_status, last_error,
-    last_latency_ms, last_seen_at, created_at, updated_at`
+    portal_tag, is_default_portal, notes, transport, rest_port, last_transport,
+    last_status, last_error, last_latency_ms, last_seen_at, created_at, updated_at`
 
 // List returns every registered router ordered by name.
 func (s *RouterStore) List(ctx context.Context) ([]Router, error) {
@@ -157,11 +203,13 @@ func (s *RouterStore) Create(ctx context.Context, router Router) (Router, error)
 	res, err := s.db.sql.ExecContext(ctx, `
         INSERT INTO routers (
             name, host, port, username, password, use_tls, verify_tls, location,
-            portal_tag, is_default_portal, notes, last_status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            portal_tag, is_default_portal, notes, transport, rest_port,
+            last_status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		router.Name, router.Host, router.Port, router.Username, sealed,
 		boolToInt(router.UseTLS), boolToInt(router.VerifyTLS), router.Location,
 		router.PortalTag, boolToInt(router.DefaultPortal), router.Notes,
+		NormalizeTransport(router.Transport), router.RestPort,
 		router.LastStatus, ts, ts)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -187,11 +235,13 @@ func (s *RouterStore) Update(ctx context.Context, router Router) (Router, error)
             name = ?, host = ?, port = ?, username = ?,
             password = COALESCE(NULLIF(?, ''), password),
             use_tls = ?, verify_tls = ?, location = ?, portal_tag = ?,
-            is_default_portal = ?, notes = ?, updated_at = ?
+            is_default_portal = ?, notes = ?, transport = ?, rest_port = ?,
+            updated_at = ?
         WHERE id = ?`,
 		router.Name, router.Host, router.Port, router.Username, sealedOrEmpty(s.db, router.Password),
 		boolToInt(router.UseTLS), boolToInt(router.VerifyTLS), router.Location,
 		router.PortalTag, boolToInt(router.DefaultPortal), router.Notes,
+		NormalizeTransport(router.Transport), router.RestPort,
 		stamp(now()), router.ID)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -257,6 +307,14 @@ func (s *RouterStore) RecordStatus(ctx context.Context, id int64, status, errMsg
 	return wrapDBError("record router status", err)
 }
 
+// RecordTransport remembers the transport that actually worked, so auto mode
+// can start with it next time instead of probing every protocol again.
+func (s *RouterStore) RecordTransport(ctx context.Context, id int64, transport string) error {
+	_, err := s.db.sql.ExecContext(ctx,
+		`UPDATE routers SET last_transport = ? WHERE id = ?`, NormalizeTransport(transport), id)
+	return wrapDBError("record router transport", err)
+}
+
 // Count returns the number of registered routers.
 func (s *RouterStore) Count(ctx context.Context) (int64, error) {
 	var n int64
@@ -292,18 +350,22 @@ type scanner interface {
 
 func (s *RouterStore) scan(row scanner) (Router, error) {
 	var (
-		r          Router
-		password   string
-		useTLS     int
-		verifyTLS  int
-		defaultPrt int
-		seenAt     sql.NullString
-		createdAt  string
-		updatedAt  string
+		r             Router
+		password      string
+		useTLS        int
+		verifyTLS     int
+		defaultPrt    int
+		transport     string
+		restPort      int
+		lastTransport string
+		seenAt        sql.NullString
+		createdAt     string
+		updatedAt     string
 	)
 	err := row.Scan(
 		&r.ID, &r.Name, &r.Host, &r.Port, &r.Username, &password, &useTLS, &verifyTLS,
-		&r.Location, &r.PortalTag, &defaultPrt, &r.Notes, &r.LastStatus, &r.LastError,
+		&r.Location, &r.PortalTag, &defaultPrt, &r.Notes, &transport, &restPort, &lastTransport,
+		&r.LastStatus, &r.LastError,
 		&r.LastLatencyMS, &seenAt, &createdAt, &updatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -320,6 +382,9 @@ func (s *RouterStore) scan(row scanner) (Router, error) {
 	r.UseTLS = useTLS != 0
 	r.VerifyTLS = verifyTLS != 0
 	r.DefaultPortal = defaultPrt != 0
+	r.Transport = NormalizeTransport(transport)
+	r.RestPort = restPort
+	r.LastTransport = strings.TrimSpace(lastTransport)
 	r.LastSeenAt = parseStampPtr(seenAt)
 	r.CreatedAt = parseStamp(sql.NullString{String: createdAt, Valid: createdAt != ""})
 	r.UpdatedAt = parseStamp(sql.NullString{String: updatedAt, Valid: updatedAt != ""})

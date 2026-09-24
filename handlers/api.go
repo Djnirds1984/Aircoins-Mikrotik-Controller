@@ -160,6 +160,9 @@ type apiRouter struct {
 	PortalTag     string     `json:"portal_tag"`
 	DefaultPortal bool       `json:"default_portal"`
 	Notes         string     `json:"notes"`
+	Transport     string     `json:"transport"`
+	RestPort      int        `json:"rest_port"`
+	LastTransport string     `json:"last_transport"`
 	LastStatus    string     `json:"last_status"`
 	LastError     string     `json:"last_error"`
 	LastLatencyMS int64      `json:"last_latency_ms"`
@@ -174,7 +177,9 @@ func toAPIRouter(r database.Router) apiRouter {
 		Username: r.Username, UseTLS: r.UseTLS, VerifyTLS: r.VerifyTLS,
 		Location: r.Location, PortalTag: r.PortalTag,
 		DefaultPortal: r.DefaultPortal, Notes: r.Notes,
-		LastStatus: r.LastStatus, LastError: r.LastError,
+		Transport: r.TransportMode(), RestPort: r.RestPort,
+		LastTransport: r.LastTransport,
+		LastStatus:    r.LastStatus, LastError: r.LastError,
 		LastLatencyMS: r.LastLatencyMS, LastSeenAt: r.LastSeenAt,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
@@ -348,6 +353,8 @@ func (h *Handler) apiRouterCreate(w http.ResponseWriter, r *http.Request) {
 		PortalTag     string `json:"portal_tag"`
 		DefaultPortal bool   `json:"default_portal"`
 		Notes         string `json:"notes"`
+		Transport     string `json:"transport"`
+		RestPort      int    `json:"rest_port"`
 	}
 	if !decodeAPIBody(r, &req) {
 		h.writeAPIError(w, http.StatusBadRequest, "bad_request",
@@ -377,6 +384,8 @@ func (h *Handler) apiRouterCreate(w http.ResponseWriter, r *http.Request) {
 		PortalTag:     strings.TrimSpace(req.PortalTag),
 		DefaultPortal: req.DefaultPortal,
 		Notes:         strings.TrimSpace(req.Notes),
+		Transport:     database.NormalizeTransport(req.Transport),
+		RestPort:      req.RestPort,
 	}
 	created, err := h.db.Routers().Create(r.Context(), router)
 	if err != nil {
@@ -412,6 +421,8 @@ func (h *Handler) apiRouterUpdate(w http.ResponseWriter, r *http.Request) {
 		PortalTag     string `json:"portal_tag"`
 		DefaultPortal bool   `json:"default_portal"`
 		Notes         string `json:"notes"`
+		Transport     string `json:"transport"`
+		RestPort      int    `json:"rest_port"`
 	}
 	if !decodeAPIBody(r, &req) {
 		h.writeAPIError(w, http.StatusBadRequest, "bad_request",
@@ -437,6 +448,8 @@ func (h *Handler) apiRouterUpdate(w http.ResponseWriter, r *http.Request) {
 		PortalTag:     strings.TrimSpace(req.PortalTag),
 		DefaultPortal: req.DefaultPortal,
 		Notes:         strings.TrimSpace(req.Notes),
+		Transport:     database.NormalizeTransport(req.Transport),
+		RestPort:      req.RestPort,
 	})
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {

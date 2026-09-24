@@ -41,6 +41,23 @@
             {{with .Form.Errors.host}}<span class="error">{{.}}</span>{{end}}
           </div>
           <div class="field">
+            <label for="transport">Connection method</label>
+            <select id="transport" name="transport">
+              <option value="auto"{{if eq .Form.Transport "auto"}} selected{{end}}>Auto (try REST, then API)</option>
+              <option value="rest-ssl"{{if eq .Form.Transport "rest-ssl"}} selected{{end}}>REST over HTTPS (www-ssl)</option>
+              <option value="rest"{{if eq .Form.Transport "rest"}} selected{{end}}>REST over HTTP (www)</option>
+              <option value="api"{{if eq .Form.Transport "api"}} selected{{end}}>API (8728)</option>
+              <option value="api-ssl"{{if eq .Form.Transport "api-ssl"}} selected{{end}}>API-SSL (8729)</option>
+            </select>
+            <span class="muted" style="font-size:.78rem">REST needs only the www or www-ssl service; the legacy API needs /ip service api.</span>
+          </div>
+          <div class="field">
+            <label for="rest_port">Web port for REST (optional)</label>
+            <input id="rest_port" name="rest_port" value="{{.Form.RestPort}}" placeholder="443" inputmode="numeric">
+            {{with .Form.Errors.rest_port}}<span class="error">{{.}}</span>{{end}}
+            <span class="muted" style="font-size:.78rem">Empty uses 443 for HTTPS and 80 for plain HTTP.</span>
+          </div>
+          <div class="field">
             <label for="port">API port</label>
             <input id="port" name="port" value="{{.Form.Port}}" inputmode="numeric" required>
             {{with .Form.Errors.port}}<span class="error">{{.}}</span>{{end}}
@@ -102,7 +119,7 @@
                 {{if .Router.PortalTag}}<div class="muted" style="font-size:.78rem">tag: {{.Router.PortalTag}}</div>{{end}}
               </td>
               <td class="mono">{{.Router.Endpoint}}
-                <div class="muted" style="font-size:.78rem">{{.Router.Username}} · {{if .Router.UseTLS}}api-ssl{{else}}api{{end}}</div>
+                <div class="muted" style="font-size:.78rem">{{.Router.Username}} · {{if eq .Router.TransportMode "rest"}}rest{{else if eq .Router.TransportMode "rest-ssl"}}rest-ssl{{else if eq .Router.TransportMode "api"}}api{{else if eq .Router.TransportMode "api-ssl"}}api-ssl{{else}}auto{{end}}</div>
               </td>
               <td><span class="{{statusClass .Router.LastStatus}}">{{.Router.LastStatus}}</span>
                 {{if .Router.LastLatencyMS}}<div class="muted" style="font-size:.78rem">{{.Router.LastLatencyMS}} ms</div>{{end}}

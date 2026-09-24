@@ -187,7 +187,7 @@ canvas#trafficCanvas{
             <td><a href="/routers/{{.Router.ID}}">{{.Router.Name}}</a>
               {{if .Router.Location}}<div class="muted" style="font-size:.8rem">{{.Router.Location}}</div>{{end}}
             </td>
-            <td class="mono">{{.Router.Endpoint}}{{if .Router.UseTLS}} · api-ssl{{end}}</td>
+            <td class="mono">{{.Router.Endpoint}}{{if eq .Router.TransportMode "rest-ssl"}} · rest-ssl{{else if eq .Router.TransportMode "rest"}} · rest{{else if eq .Router.TransportMode "api-ssl"}} · api-ssl{{else if eq .Router.TransportMode "api"}} · api{{end}}</td>
             <td><span class="{{statusClass .Router.LastStatus}}">{{.Router.LastStatus}}</span>
               {{if .Router.LastError}}<div class="muted" style="font-size:.78rem">{{.Router.LastError}}</div>{{end}}
             </td>

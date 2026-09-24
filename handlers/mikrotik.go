@@ -166,14 +166,23 @@ type MikrotikClient struct {
 	timeout  time.Duration
 	log      *slog.Logger
 
+	// tp is the protocol selected for this router (legacy binary API or REST)
+	// and transportName is its identifier, used in logs and stored in
+	// routers.last_transport.
+	tp            transport
+	transportName string
+
+	// mu guards the binary API socket, which is kept open and reconnected
+	// transparently. The REST transport is stateless and ignores these.
 	mu          sync.Mutex
 	conn        *ros.Client
 	connectedAt time.Time
 	reconnects  int
 }
 
-// DialRouter connects to a router and verifies the credentials. The returned
-// client keeps the connection open and reconnects transparently.
+// DialRouter connects to a router and verifies the credentials, trying every
+// transport candidate the router's mode allows. The client keeps the winning
+// transport for all later commands.
 func DialRouter(ctx context.Context, router database.Router, timeout time.Duration, logger *slog.Logger) (*MikrotikClient, error) {
 	if timeout <= 0 {
 		timeout = 12 * time.Second
@@ -187,14 +196,179 @@ func DialRouter(ctx context.Context, router database.Router, timeout time.Durati
 		timeout:  timeout,
 		log:      logger.With("router", router.Name, "endpoint", router.Endpoint()),
 	}
-	if _, err := client.connection(ctx); err != nil {
-		return nil, err
+
+	candidates := transportCandidates(router)
+	var lastErr error
+	for index, candidate := range candidates {
+		tp := newTransport(client, candidate)
+		// Point the client - and therefore the dial and every error message - at
+		// the candidate being tried, so a failed probe names the right port.
+		client.endpoint = candidateEndpoint(candidate)
+		attemptCtx, cancel := context.WithTimeout(ctx, candidateTimeout(timeout, len(candidates)))
+		err := tp.Connect(attemptCtx)
+		cancel()
+		if err == nil {
+			client.tp = tp
+			client.transportName = candidate.mode
+			if index > 0 {
+				logger.Info("router transport selected", "router", router.Name,
+					"transport", candidate.mode, "port", candidate.port)
+			}
+			return client, nil
+		}
+		lastErr = err
+		_ = tp.Close()
+		logger.Debug("router transport unavailable", "router", router.Name,
+			"transport", candidate.mode, "port", candidate.port, "error", err)
+		if ctx.Err() != nil {
+			break
+		}
 	}
-	return client, nil
+	if lastErr == nil {
+		lastErr = routerError(client.endpoint, "", "this router has no usable transport", ErrRouterUnreachable, nil)
+	}
+	return nil, lastErr
 }
 
-// Close releases the API connection.
+// transport runs one RouterOS command on a device. The legacy binary API and
+// the RouterOS v7 REST API both implement it, so every command in this package
+// is written once.
+type transport interface {
+	// Name is the transport identifier stored in routers.last_transport.
+	Name() string
+	// Connect dials and authenticates. It is idempotent, so Run can call it
+	// before every command.
+	Connect(ctx context.Context) error
+	// Run executes one command and returns its rows.
+	Run(ctx context.Context, command string, args ...string) (Reply, error)
+	// Reset drops a dead connection so the next command dials again.
+	Reset()
+	// Close releases the connection.
+	Close() error
+}
+
+// transportCandidate is one protocol/port pair the controller may try.
+type transportCandidate struct {
+	mode   string
+	host   string
+	port   int
+	tls    bool
+	verify bool
+}
+
+// probeCap bounds a single attempt while auto mode probes several transports,
+// so an unreachable device cannot stall a page for the sum of every timeout.
+const probeCap = 4 * time.Second
+
+// newTransport builds the protocol implementation for one candidate.
+func newTransport(client *MikrotikClient, candidate transportCandidate) transport {
+	if candidate.mode == database.TransportREST || candidate.mode == database.TransportRESTSsl {
+		return newRestTransport(client, candidate)
+	}
+	return newRosTransport(client, candidate)
+}
+
+// transportCandidates lists the protocols to try, in order, for one router.
+//
+// An explicit mode yields a single candidate. Auto mode tries the transport
+// that worked last time first - so a healthy router is never probed twice -
+// then REST before the legacy API, because REST only needs the www/www-ssl
+// service an operator usually has already enabled.
+func transportCandidates(router database.Router) []transportCandidate {
+	rest := func(tls bool) transportCandidate {
+		port := router.RestPort
+		if port <= 0 {
+			port = 80
+			if tls {
+				port = 443
+			}
+		}
+		mode := database.TransportREST
+		if tls {
+			mode = database.TransportRESTSsl
+		}
+		return transportCandidate{mode: mode, host: router.Host, port: port, tls: tls, verify: router.VerifyTLS}
+	}
+	api := func(tls bool) transportCandidate {
+		port := router.Port
+		if port <= 0 {
+			port = 8728
+			if tls {
+				port = 8729
+			}
+		}
+		mode := database.TransportAPI
+		if tls {
+			mode = database.TransportAPISSL
+		}
+		return transportCandidate{mode: mode, host: router.Host, port: port, tls: tls, verify: router.VerifyTLS}
+	}
+
+	switch router.TransportMode() {
+	case database.TransportAPI:
+		return []transportCandidate{api(false)}
+	case database.TransportAPISSL:
+		return []transportCandidate{api(true)}
+	case database.TransportREST:
+		return []transportCandidate{rest(false)}
+	case database.TransportRESTSsl:
+		return []transportCandidate{rest(true)}
+	}
+
+	order := []transportCandidate{rest(true), rest(false), api(true), api(false)}
+	last := router.LastTransport
+	if !database.ValidTransport(last) || last == database.TransportAuto {
+		last = ""
+	}
+	out := make([]transportCandidate, 0, len(order))
+	for _, candidate := range order {
+		if candidate.mode == last {
+			out = append(out, candidate)
+		}
+	}
+	for _, candidate := range order {
+		if candidate.mode == last {
+			continue
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+// candidateTimeout shortens each attempt while several candidates are probed; a
+// single configured transport gets the full budget.
+func candidateTimeout(full time.Duration, candidates int) time.Duration {
+	if candidates <= 1 || full <= probeCap {
+		return full
+	}
+	return probeCap
+}
+
+// candidateEndpoint renders host:port for logs and error messages.
+func candidateEndpoint(candidate transportCandidate) string {
+	if candidate.port <= 0 {
+		return candidate.host
+	}
+	return fmt.Sprintf("%s:%d", candidate.host, candidate.port)
+}
+
+// routerError builds the decorated error every transport returns.
+func routerError(endpoint, command, message string, sentinel, cause error) error {
+	return &RouterError{Endpoint: endpoint, Command: command, Message: message, Sentinel: sentinel, cause: cause}
+}
+
+// Close releases the connection held by the active transport.
 func (c *MikrotikClient) Close() error {
+	if c.tp != nil {
+		if err := c.tp.Close(); err != nil {
+			return err
+		}
+	}
+	return c.closeConn()
+}
+
+// closeConn releases the binary API socket. It is idempotent.
+func (c *MikrotikClient) closeConn() error {
 	c.mu.Lock()
 	conn := c.conn
 	c.conn = nil
@@ -204,6 +378,9 @@ func (c *MikrotikClient) Close() error {
 	}
 	return conn.Close()
 }
+
+// TransportName reports the protocol in use: api, api-ssl, rest or rest-ssl.
+func (c *MikrotikClient) TransportName() string { return c.transportName }
 
 // Router returns the inventory record this client was built from.
 func (c *MikrotikClient) Router() database.Router { return c.router }
@@ -285,10 +462,6 @@ func (c *MikrotikClient) drop() {
 // "router rebooted / WiFi blipped" case); every other failure is classified and
 // returned straight away so the UI can explain what happened.
 func (c *MikrotikClient) Run(ctx context.Context, command string, args ...string) (Reply, error) {
-	sentences := make([]string, 0, len(args)+1)
-	sentences = append(sentences, command)
-	sentences = append(sentences, args...)
-
 	var lastErr error
 	for attempt := 1; attempt <= runAttempts; attempt++ {
 		if attempt > 1 {
@@ -298,11 +471,10 @@ func (c *MikrotikClient) Run(ctx context.Context, command string, args ...string
 				}
 				return Reply{}, err
 			}
-			c.drop()
+			c.tp.Reset()
 		}
 
-		conn, err := c.connection(ctx)
-		if err != nil {
+		if err := c.tp.Connect(ctx); err != nil {
 			lastErr = err
 			if !isConnectionLoss(err) || attempt == runAttempts {
 				return Reply{}, err
@@ -311,9 +483,9 @@ func (c *MikrotikClient) Run(ctx context.Context, command string, args ...string
 			continue
 		}
 
-		reply, err := conn.RunArgsContext(ctx, sentences)
+		reply, err := c.tp.Run(ctx, command, args...)
 		if err == nil {
-			return toReply(reply), nil
+			return reply, nil
 		}
 		classified := c.classify(command, err)
 		if !isConnectionLoss(err) || attempt == runAttempts {
@@ -1091,6 +1263,13 @@ func (h *Handler) dialRouter(ctx context.Context, router database.Router) (*Mikr
 	}
 	if recErr := h.db.Routers().RecordStatus(ctx, router.ID, database.RouterStatusOnline, "", latency); recErr != nil {
 		h.log.Error("cannot record router status", "router", router.Name, "error", recErr)
+	}
+	// Remember the protocol that answered so auto mode starts with it next time
+	// instead of probing REST and then the binary API on every page load.
+	if name := client.TransportName(); name != "" && name != router.LastTransport {
+		if recErr := h.db.Routers().RecordTransport(ctx, router.ID, name); recErr != nil {
+			h.log.Error("cannot record router transport", "router", router.Name, "error", recErr)
+		}
 	}
 	return client, nil
 }

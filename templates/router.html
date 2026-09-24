@@ -308,7 +308,7 @@
         <dt>Endpoint</dt><dd class="mono">{{.Router.Endpoint}}</dd>
         <dt>API user</dt><dd class="mono">{{.Router.Username}}</dd>
         <dt>Password</dt><dd class="mono">{{.Router.MaskedPassword}}</dd>
-        <dt>Transport</dt><dd>{{if .Router.UseTLS}}API-SSL{{if .Router.VerifyTLS}} (certificate verified){{else}} (self signed accepted){{end}}{{else}}plain API{{end}}</dd>
+        <dt>Transport</dt><dd>{{if eq .Router.TransportMode "rest"}}REST over HTTP{{else if eq .Router.TransportMode "rest-ssl"}}REST over HTTPS{{else if eq .Router.TransportMode "api"}}plain API{{else if eq .Router.TransportMode "api-ssl"}}API-SSL{{else}}auto{{end}}{{if .Router.LastTransport}} · in use: {{.Router.LastTransport}}{{end}}{{if .Router.VerifyTLS}} · certificate verified{{end}}</dd>
         <dt>Portal tag</dt><dd>{{default .Router.PortalTag "not set"}}{{if .Router.DefaultPortal}} · default portal{{end}}</dd>
         <dt>Last seen</dt><dd>{{timeLabel .Router.LastSeenAt}}</dd>
         <dt>Registered</dt><dd>{{.Router.CreatedAt.Format "02 Jan 2006 15:04"}}</dd>
@@ -330,6 +330,20 @@
           <div class="field">
             <label for="ehost">IP / hostname</label>
             <input id="ehost" name="host" value="{{.Form.Host}}" required>
+          </div>
+          <div class="field">
+            <label for="etransport">Connection method</label>
+            <select id="etransport" name="transport">
+              <option value="auto"{{if eq .Form.Transport "auto"}} selected{{end}}>Auto (try REST, then API)</option>
+              <option value="rest-ssl"{{if eq .Form.Transport "rest-ssl"}} selected{{end}}>REST over HTTPS (www-ssl)</option>
+              <option value="rest"{{if eq .Form.Transport "rest"}} selected{{end}}>REST over HTTP (www)</option>
+              <option value="api"{{if eq .Form.Transport "api"}} selected{{end}}>API (8728)</option>
+              <option value="api-ssl"{{if eq .Form.Transport "api-ssl"}} selected{{end}}>API-SSL (8729)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="erest_port">Web port for REST (optional)</label>
+            <input id="erest_port" name="rest_port" value="{{.Form.RestPort}}" placeholder="443" inputmode="numeric">
           </div>
           <div class="field">
             <label for="eport">API port</label>
