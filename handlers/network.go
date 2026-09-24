@@ -33,6 +33,8 @@ const (
 	tabUserProfiles   networkTab = "user-profiles"
 	tabWalledGarden   networkTab = "walled-garden"
 	tabWalledGardenIP networkTab = "walled-garden-ip"
+	tabPools          networkTab = "pools"
+	tabVLANs          networkTab = "vlans"
 )
 
 // networkTabs is the order the page renders the sections in.
@@ -42,6 +44,8 @@ var networkTabs = []networkTab{
 	tabUserProfiles,
 	tabWalledGarden,
 	tabWalledGardenIP,
+	tabPools,
+	tabVLANs,
 }
 
 // Label is the human readable name of a section.
@@ -55,6 +59,10 @@ func (t networkTab) Label() string {
 		return "Walled garden"
 	case tabWalledGardenIP:
 		return "Walled garden IP"
+	case tabPools:
+		return "IP pools"
+	case tabVLANs:
+		return "VLANs"
 	default:
 		return "Hotspot servers"
 	}
@@ -71,6 +79,10 @@ func (t networkTab) Hint() string {
 		return "Host, port, path and method patterns from /ip/hotspot/walled-garden that clients may reach before logging in. dst-address is resolved by RouterOS from dst-host and stays read only."
 	case tabWalledGardenIP:
 		return "Address and protocol rules from /ip/hotspot/walled-garden/ip. Unlike the host rules these take dst-address directly and use accept, drop or reject."
+	case tabPools:
+		return "Address ranges from /ip/pool that the hotspot, DHCP and PPPoE servers lease out. Pools are created here; manage their members on the device."
+	case tabVLANs:
+		return "Bridge VLAN entries from /interface/bridge/vlan. One entry may carry a single VLAN ID or a range such as 100-120, tagged and untagged on the ports you pick."
 	default:
 		return "Hotspot servers from /ip/hotspot, each bound to one or more interfaces. The interface is mandatory when creating a server."
 	}
@@ -124,10 +136,13 @@ type networkPage struct {
 	UserProfiles   []HotspotProfile
 	WalledGarden   []WalledGardenEntry
 	WalledGardenIP []WalledGardenIPEntry
+	PoolRows       []IPPool
+	VLANs          []BridgeVLAN
 
 	// Option sources for the editor forms.
 	Interfaces         []InterfaceStats
 	Pools              []string
+	Bridges            []string
 	ServerNames        []string
 	ServerProfileNames []string
 	UserProfileNames   []string
@@ -150,6 +165,8 @@ type networkPage struct {
 	UserProfileForm    *hotspotUserProfileForm
 	WalledGardenForm   *walledGardenForm
 	WalledGardenIPForm *walledGardenIPForm
+	PoolForm           *ipPoolForm
+	VLANForm           *bridgeVLANForm
 }
 
 // newNetworkPage returns a page whose forms are all initialised, so the template
@@ -165,6 +182,8 @@ func (h *Handler) newNetworkPage(tab networkTab) *networkPage {
 		UserProfileForm:    newHotspotUserProfileForm(),
 		WalledGardenForm:   newWalledGardenForm(),
 		WalledGardenIPForm: newWalledGardenIPForm(),
+		PoolForm:           newIPPoolForm(),
+		VLANForm:           newBridgeVLANForm(),
 
 		LoginByMethods:        loginByMethods,
 		RadiusMACFormats:      radiusMACFormats,
@@ -189,6 +208,10 @@ func (p *networkPage) Count(tab networkTab) int {
 		return len(p.WalledGarden)
 	case tabWalledGardenIP:
 		return len(p.WalledGardenIP)
+	case tabPools:
+		return len(p.PoolRows)
+	case tabVLANs:
+		return len(p.VLANs)
 	default:
 		return len(p.Servers)
 	}
@@ -1066,6 +1089,156 @@ func (f *walledGardenIPForm) spec() WalledGardenIPSpec {
 }
 
 // ---------------------------------------------------------------------------
+// IP pool editor
+// ---------------------------------------------------------------------------
+
+// ipPoolForm carries the /ip/pool create editor values. Pools are add-only:
+// their ranges are edited on the device where the used portion is visible.
+type ipPoolForm struct {
+	Name     string
+	Ranges   string
+	NextPool string
+	Comment  string
+	Errors   map[string]string
+}
+
+// newIPPoolForm returns an empty editor.
+func newIPPoolForm() *ipPoolForm {
+	return &ipPoolForm{Errors: map[string]string{}}
+}
+
+// ipPoolFormFromRequest reads the submitted editor.
+func ipPoolFormFromRequest(r *http.Request) *ipPoolForm {
+	return &ipPoolForm{
+		Name:     strings.TrimSpace(r.PostFormValue("name")),
+		Ranges:   strings.TrimSpace(r.PostFormValue("ranges")),
+		NextPool: strings.TrimSpace(r.PostFormValue("next_pool")),
+		Comment:  strings.TrimSpace(r.PostFormValue("comment")),
+		Errors:   map[string]string{},
+	}
+}
+
+// validate checks the create editor. The ranges are the pool: without a valid
+// address, range or list of either, RouterOS would reject the whole add.
+func (f *ipPoolForm) validate() bool {
+	if f.Errors == nil {
+		f.Errors = map[string]string{}
+	}
+	if f.Name == "" {
+		f.Errors["name"] = "Name the pool so hotspot and DHCP forms can offer it."
+	} else if tooLong(f.Name) {
+		f.Errors["name"] = "Keep the name under 200 characters."
+	}
+	if f.Ranges == "" {
+		f.Errors["ranges"] = "Give the pool at least one address, such as 10.0.0.10-10.0.0.200."
+	} else if !validIPOrRange(f.Ranges) {
+		f.Errors["ranges"] = "Enter an address, a range (10.0.0.10-10.0.0.200) or a comma separated list of them."
+	}
+	if tooLong(f.NextPool) {
+		f.Errors["next_pool"] = "Keep the next pool name under 200 characters."
+	}
+	if tooLong(f.Comment) {
+		f.Errors["comment"] = "Keep the comment under 200 characters."
+	}
+	return len(f.Errors) == 0
+}
+
+// ---------------------------------------------------------------------------
+// Bridge VLAN editor
+// ---------------------------------------------------------------------------
+
+// bridgeVLANForm carries the /interface/bridge/vlan create editor values. Like
+// the pools, entries are added here and managed on the device afterwards.
+type bridgeVLANForm struct {
+	Bridge   string
+	VLANIDs  string
+	Tagged   string
+	Untagged string
+	Errors   map[string]string
+}
+
+// newBridgeVLANForm returns an empty editor.
+func newBridgeVLANForm() *bridgeVLANForm {
+	return &bridgeVLANForm{Errors: map[string]string{}}
+}
+
+// bridgeVLANFormFromRequest reads the submitted editor.
+func bridgeVLANFormFromRequest(r *http.Request) *bridgeVLANForm {
+	return &bridgeVLANForm{
+		Bridge:   strings.TrimSpace(r.PostFormValue("bridge")),
+		VLANIDs:  strings.TrimSpace(r.PostFormValue("vlan_ids")),
+		Tagged:   strings.TrimSpace(r.PostFormValue("tagged")),
+		Untagged: strings.TrimSpace(r.PostFormValue("untagged")),
+		Errors:   map[string]string{},
+	}
+}
+
+// validate checks the create editor: a bridge owns the entry, the VLAN IDs
+// decide what the entry is, and at least one port list makes it useful.
+func (f *bridgeVLANForm) validate() bool {
+	if f.Errors == nil {
+		f.Errors = map[string]string{}
+	}
+	if f.Bridge == "" {
+		f.Errors["bridge"] = "Pick the bridge that owns this VLAN entry."
+	} else if tooLong(f.Bridge) {
+		f.Errors["bridge"] = "Keep the bridge name under 200 characters."
+	}
+	if f.VLANIDs == "" {
+		f.Errors["vlan_ids"] = "Enter a VLAN ID (100) or a range (100-120)."
+	} else if !validVLANIDSpec(f.VLANIDs) {
+		f.Errors["vlan_ids"] = "Use VLAN IDs from 1 to 4094, as 100, or as ranges like 100-120."
+	}
+	if f.Tagged == "" && f.Untagged == "" {
+		f.Errors["tagged"] = "List at least one tagged or untagged port for the VLAN."
+	}
+	if tooLong(f.Tagged) {
+		f.Errors["tagged"] = "Keep the tagged port list under 200 characters."
+	}
+	if tooLong(f.Untagged) {
+		f.Errors["untagged"] = "Keep the untagged port list under 200 characters."
+	}
+	return len(f.Errors) == 0
+}
+
+// validVLANIDSpec validates a RouterOS vlan-ids value: a comma separated list
+// of single IDs or ranges, every ID between 1 and 4094 and every range rising.
+func validVLANIDSpec(value string) bool {
+	if strings.TrimSpace(value) == "" {
+		return false
+	}
+	for _, item := range splitROSList(value) {
+		if !validVLANIDItem(item) {
+			return false
+		}
+	}
+	return true
+}
+
+// validVLANIDItem validates one "100" or "100-120" entry.
+func validVLANIDItem(value string) bool {
+	lowRaw, highRaw, ranged := strings.Cut(value, "-")
+	low, ok := parseVLANID(lowRaw)
+	if !ok {
+		return false
+	}
+	if !ranged {
+		return true
+	}
+	high, ok := parseVLANID(highRaw)
+	return ok && high >= low
+}
+
+// parseVLANID reads one VLAN ID, accepting only the 1-4094 IEEE range.
+func parseVLANID(value string) (int, bool) {
+	id, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || id < 1 || id > 4094 {
+		return 0, false
+	}
+	return id, true
+}
+
+// ---------------------------------------------------------------------------
 // Read handlers
 // ---------------------------------------------------------------------------
 
@@ -1210,6 +1383,24 @@ func (h *Handler) loadNetwork(ctx context.Context, view *networkPage) {
 		view.Warnings = append(view.Warnings, "Address pools unavailable: "+routerErrorHint(err))
 	} else {
 		view.Pools = pools
+	}
+
+	if pools, err := client.IPPools(callCtx); err != nil {
+		view.Warnings = append(view.Warnings, "IP pool table unavailable: "+routerErrorHint(err))
+	} else {
+		view.PoolRows = pools
+	}
+
+	if vlans, err := client.BridgeVLANs(callCtx); err != nil {
+		view.Warnings = append(view.Warnings, "Bridge VLAN table unavailable: "+routerErrorHint(err))
+	} else {
+		view.VLANs = vlans
+	}
+
+	if bridges, err := client.Bridges(callCtx); err != nil {
+		view.Warnings = append(view.Warnings, "Bridge list unavailable: "+routerErrorHint(err))
+	} else {
+		view.Bridges = bridges
 	}
 }
 
@@ -1852,6 +2043,74 @@ func (h *Handler) WalledGardenIPDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	h.flashAndRedirect(w, r, networkPath(router.ID, tabWalledGardenIP), "ok",
 		"Walled garden IP rule "+objectID+" deleted from "+router.Name)
+}
+
+// ---------------------------------------------------------------------------
+// IP pools
+// ---------------------------------------------------------------------------
+
+// IPPoolCreate adds an address pool to /ip/pool. The section is add-only:
+// shrinking a pool that hands out leases is done on the device, where the used
+// portion is visible.
+func (h *Handler) IPPoolCreate(w http.ResponseWriter, r *http.Request) {
+	form := ipPoolFormFromRequest(r)
+	if !form.validate() {
+		view := h.newNetworkPage(tabPools)
+		view.PoolForm = form
+		h.renderNetworkErrors(w, r, view)
+		return
+	}
+
+	router, client, ok := h.networkDevice(w, r, tabPools)
+	if !ok {
+		return
+	}
+	defer client.Close()
+
+	callCtx, cancel := context.WithTimeout(r.Context(), h.cfg.APITimeout)
+	defer cancel()
+
+	id, err := client.AddIPPool(callCtx, form.Name, form.Ranges, form.NextPool, form.Comment)
+	if err != nil {
+		h.flashErr(w, r, networkPath(router.ID, tabPools),
+			"Creating the IP pool failed", err)
+		return
+	}
+	h.flashAndRedirect(w, r, networkPath(router.ID, tabPools), "ok",
+		"IP pool "+defaultValue(form.Name, id)+" created on "+router.Name)
+}
+
+// ---------------------------------------------------------------------------
+// Bridge VLANs
+// ---------------------------------------------------------------------------
+
+// BridgeVLANCreate adds one VLAN or a VLAN-ID range to a bridge's VLAN table.
+// Like the pools, entries are created here and removed on the device.
+func (h *Handler) BridgeVLANCreate(w http.ResponseWriter, r *http.Request) {
+	form := bridgeVLANFormFromRequest(r)
+	if !form.validate() {
+		view := h.newNetworkPage(tabVLANs)
+		view.VLANForm = form
+		h.renderNetworkErrors(w, r, view)
+		return
+	}
+
+	router, client, ok := h.networkDevice(w, r, tabVLANs)
+	if !ok {
+		return
+	}
+	defer client.Close()
+
+	callCtx, cancel := context.WithTimeout(r.Context(), h.cfg.APITimeout)
+	defer cancel()
+
+	if _, err := client.AddBridgeVLAN(callCtx, form.Bridge, form.VLANIDs, form.Tagged, form.Untagged); err != nil {
+		h.flashErr(w, r, networkPath(router.ID, tabVLANs),
+			"Creating the bridge VLAN entry failed", err)
+		return
+	}
+	h.flashAndRedirect(w, r, networkPath(router.ID, tabVLANs), "ok",
+		"VLAN "+form.VLANIDs+" created on "+router.Name+" ("+form.Bridge+")")
 }
 
 // ---------------------------------------------------------------------------

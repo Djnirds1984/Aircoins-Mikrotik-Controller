@@ -143,6 +143,12 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("POST /network/{id}/walled-garden-ip/{sid}/toggle", h.WalledGardenIPToggle)
 	mux.HandleFunc("POST /network/{id}/walled-garden-ip/{sid}/delete", h.WalledGardenIPDelete)
 
+	// IP pools (/ip/pool) - create only.
+	mux.HandleFunc("POST /network/{id}/pools", h.IPPoolCreate)
+
+	// Bridge VLANs (/interface/bridge/vlan) - create only.
+	mux.HandleFunc("POST /network/{id}/vlans", h.BridgeVLANCreate)
+
 	// Session history.
 	mux.HandleFunc("GET /sessions", h.SessionsList)
 

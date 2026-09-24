@@ -15,7 +15,7 @@
   <div class="page-head">
     <div>
       <h1>Network</h1>
-      <p class="sub">Hotspot servers, server profiles, user profiles and walled garden rules, read live from a device.</p>
+      <p class="sub">Hotspot servers, server profiles, user profiles, walled garden rules, IP pools and VLANs, read live from a device.</p>
     </div>
   </div>
   <section class="card">
@@ -861,6 +861,133 @@
       </form>
     </details>
   </section>
+{{else if eq .Tab "pools"}}
+  <section class="card">
+    <h2>IP pools <span class="badge slate">{{len .PoolRows}}</span></h2>
+    <p class="hint">/ip/pool — ranges leased out by the hotspot, DHCP and PPPoE servers. Created below; edited on the device so the used portion stays visible.</p>
+    {{if .PoolRows}}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Name</th><th>Ranges</th><th>Next pool</th><th>Comment</th></tr>
+        </thead>
+        <tbody>
+        {{range .PoolRows}}
+          <tr>
+            <td><strong>{{.Name}}</strong></td>
+            <td class="mono">{{.Ranges}}</td>
+            <td>{{if .NextPool}}<span class="badge blue">{{.NextPool}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+            <td>{{if .Comment}}{{.Comment}}{{else}}<span class="muted">—</span>{{end}}</td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty">No IP pool on this device yet. Hotspot address pools are picked from this table.</div>
+    {{end}}
+  </section>
+  <section class="card" style="margin-top:16px">
+    {{$form := .PoolForm}}
+    <details class="editor" open>
+      <summary>Add an IP pool</summary>
+      <form method="post" action="/network/{{$.Router.ID}}/pools">
+        {{template "csrf" $}}
+        <div class="form-grid">
+          <div class="field">
+            <label for="pool-name">Name</label>
+            <input id="pool-name" name="name" value="{{$form.Name}}" maxlength="200" placeholder="hotspot_pool" required>
+            {{with $form.Errors.name}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="pool-ranges">Ranges</label>
+            <input id="pool-ranges" name="ranges" value="{{$form.Ranges}}" placeholder="10.0.0.10-10.0.0.200">
+            {{with $form.Errors.ranges}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="pool-next">Next pool</label>
+            <input id="pool-next" name="next_pool" value="{{$form.NextPool}}" list="pool-options" placeholder="(none)">
+            {{with $form.Errors.next_pool}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="pool-comment">Comment</label>
+            <input id="pool-comment" name="comment" value="{{$form.Comment}}" maxlength="200">
+            {{with $form.Errors.comment}}<span class="error">{{.}}</span>{{end}}
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn primary" type="submit">Create pool</button>
+        </div>
+      </form>
+    </details>
+  </section>
+  <datalist id="pool-options">{{range .Pools}}<option value="{{.}}"></option>{{end}}</datalist>
+{{else if eq .Tab "vlans"}}
+  <section class="card">
+    <h2>VLANs <span class="badge slate">{{len .VLANs}}</span></h2>
+    <p class="hint">/interface/bridge/vlan — which ports carry which VLANs on each bridge. One entry may hold a single ID or a whole range such as 100-120.</p>
+    {{if .VLANs}}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Bridge</th><th>VLAN IDs</th><th>Tagged</th><th>Untagged</th><th>Active on</th><th>State</th></tr>
+        </thead>
+        <tbody>
+        {{range .VLANs}}
+          <tr>
+            <td><strong>{{.Bridge}}</strong></td>
+            <td class="mono">{{.VLANIDs}}</td>
+            <td>{{if .Tagged}}<span class="badge slate">{{.Tagged}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+            <td>{{if .Untagged}}<span class="badge slate">{{.Untagged}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+            <td class="mono" style="font-size:.8rem">{{default .Current "—"}}</td>
+            <td>{{if .Disabled}}<span class="badge slate">disabled</span>{{else}}<span class="badge green">enabled</span>{{end}}</td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty">No bridge VLAN entry on this device yet.</div>
+    {{end}}
+  </section>
+  <section class="card" style="margin-top:16px">
+    {{$form := .VLANForm}}
+    <details class="editor" open>
+      <summary>Add a VLAN</summary>
+      <form method="post" action="/network/{{$.Router.ID}}/vlans">
+        {{template "csrf" $}}
+        <div class="form-grid">
+          <div class="field">
+            <label for="vlan-bridge">Bridge</label>
+            <select id="vlan-bridge" name="bridge">
+              <option value=""{{if eq $form.Bridge ""}} selected{{end}}>(pick a bridge)</option>
+              {{range $.Bridges}}<option value="{{.}}"{{if eq . $form.Bridge}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+            {{with $form.Errors.bridge}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="vlan-ids">VLAN IDs</label>
+            <input id="vlan-ids" name="vlan_ids" value="{{$form.VLANIDs}}" placeholder="100 or 100-120">
+            {{with $form.Errors.vlan_ids}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="vlan-tagged">Tagged ports</label>
+            <input id="vlan-tagged" name="tagged" value="{{$form.Tagged}}" list="iface-options" placeholder="ether2, sfp-sfpplus1">
+            {{with $form.Errors.tagged}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="vlan-untagged">Untagged ports</label>
+            <input id="vlan-untagged" name="untagged" value="{{$form.Untagged}}" list="iface-options" placeholder="ether3">
+            {{with $form.Errors.untagged}}<span class="error">{{.}}</span>{{end}}
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn primary" type="submit">Create VLAN</button>
+        </div>
+      </form>
+    </details>
+  </section>
+  <datalist id="iface-options">{{range .Interfaces}}<option value="{{.Name}}"></option>{{end}}</datalist>
 {{end}}
 {{end}}
 </main>
