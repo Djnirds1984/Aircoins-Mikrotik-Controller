@@ -55,7 +55,7 @@
             <label for="rest_port">Web port for REST (optional)</label>
             <input id="rest_port" name="rest_port" value="{{.Form.RestPort}}" placeholder="443" inputmode="numeric">
             {{with .Form.Errors.rest_port}}<span class="error">{{.}}</span>{{end}}
-            <span class="muted" style="font-size:.78rem">Empty uses 443 for HTTPS and 80 for plain HTTP.</span>
+            <span class="muted" style="font-size:.78rem">Enter the actual www port for HTTP REST, for example 10775. Port 80 is never selected automatically.</span>
           </div>
           <div class="field">
             <label for="port">API port</label>

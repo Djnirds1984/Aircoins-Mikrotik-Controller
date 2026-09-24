@@ -200,6 +200,15 @@ func DialRouter(ctx context.Context, router database.Router, timeout time.Durati
 	candidates := transportCandidates(router)
 	var lastErr error
 	for index, candidate := range candidates {
+		// Plain REST must be explicit about its port. In particular, never turn
+		// an omitted rest_port into port 80: a public hostname can expose an
+		// unrelated web service there and the controller must not send API
+		// credentials to it.
+		if candidate.mode == database.TransportREST && (candidate.port <= 0 || candidate.port == 80) {
+			lastErr = routerError(candidateEndpoint(candidate), "",
+				"REST over HTTP requires an explicit web port other than 80; refusing the unsafe port 80", ErrRouterUnreachable, nil)
+			break
+		}
 		tp := newTransport(client, candidate)
 		// Point the client - and therefore the dial and every error message - at
 		// the candidate being tried, so a failed probe names the right port.
@@ -281,7 +290,11 @@ func transportCandidates(router database.Router) []transportCandidate {
 	rest := func(tls bool) transportCandidate {
 		port := router.RestPort
 		if port <= 0 {
-			port = 80
+			// HTTPS has a safe standard default. Plain HTTP deliberately has
+			// none: the operator must name the actual www port (10775, for
+			// example) instead of accidentally contacting a public web server
+			// on port 80.
+			port = 0
 			if tls {
 				port = 443
 			}

@@ -451,11 +451,22 @@ func TestRestCandidateSelection(t *testing.T) {
 	if len(got) != 1 || got[0].mode != database.TransportRESTSsl || got[0].port != 443 {
 		t.Errorf("explicit rest-ssl = %#v", got)
 	}
-	// HTTP remains available when the operator deliberately selects it.
+	// HTTP remains available only with an explicit port; omitted means invalid.
 	router.Transport = database.TransportREST
 	got = transportCandidates(router)
+	if len(got) != 1 || got[0].mode != database.TransportREST || got[0].port != 0 {
+		t.Errorf("explicit plain REST without a port = %#v", got)
+	}
+	// HTTP remains available only with an explicit non-80 port.
+	router.Transport = database.TransportREST
+	router.RestPort = 80
+	got = transportCandidates(router)
 	if len(got) != 1 || got[0].mode != database.TransportREST || got[0].port != 80 {
-		t.Errorf("explicit plain REST = %#v", got)
+		t.Fatalf("explicit plain REST on 80 = %#v", got)
+	}
+	_, port80Err := DialRouter(context.Background(), router, time.Second, slog.New(slog.DiscardHandler))
+	if port80Err == nil || !strings.Contains(port80Err.Error(), "other than 80") {
+		t.Fatalf("dialer on explicit port 80 = %v, want a refusal", port80Err)
 	}
 	router.Transport = database.TransportREST
 	router.RestPort = 8080
@@ -463,6 +474,23 @@ func TestRestCandidateSelection(t *testing.T) {
 	if len(got) != 1 || got[0].port != 8080 || got[0].tls {
 		t.Errorf("explicit rest on 8080 = %#v", got)
 	}
+
+	// The dialer itself must also reject an old database row that selected HTTP
+	// REST before rest_port became mandatory. It must not make a network request.
+	_, err := DialRouter(context.Background(), database.Router{
+		Host: "remote.oxapsph.com", Port: 8728, Username: "aircoins", Password: "secret",
+		Transport: database.TransportREST,
+	}, time.Second, slog.New(slog.DiscardHandler))
+	if err == nil {
+		t.Fatal("plain REST without a web port unexpectedly connected")
+	}
+	if strings.Contains(err.Error(), "remote.oxapsph.com:80") {
+		t.Fatalf("dialer still contacted or named port 80: %v", err)
+	}
+	if !strings.Contains(err.Error(), "explicit web port") {
+		t.Fatalf("error = %v, want an explicit-port explanation", err)
+	}
+
 }
 
 // TestRestEndToEndOverTheWebForm drives the whole path an operator uses: add a

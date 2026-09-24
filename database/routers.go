@@ -72,8 +72,9 @@ type Router struct {
 	// Transport selects the protocol used to talk to the device: auto, api,
 	// api-ssl, rest or rest-ssl. The empty string behaves like auto.
 	Transport string
-	// RestPort is the www/www-ssl port used by the REST transports. Zero uses
-	// 443 for HTTPS and 80 for plain HTTP.
+	// RestPort is the www/www-ssl port used by the REST transports. HTTPS
+	// defaults to 443; plain HTTP requires an explicit port and never defaults
+	// to port 80.
 	RestPort int
 	// LastTransport records the transport that last connected successfully, so
 	// auto mode can try it first instead of probing every protocol again.

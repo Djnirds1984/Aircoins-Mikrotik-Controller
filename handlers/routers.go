@@ -90,8 +90,9 @@ func routerFormFromRequest(r *http.Request) *routerForm {
 	return form
 }
 
-// restPort parses the optional www/www-ssl port. Zero is valid and means the
-// protocol default (80 for http, 443 for https).
+// restPort parses the optional www/www-ssl port. HTTPS uses 443 when this is
+// empty; plain HTTP must have an explicit port and therefore returns 0 as a
+// validation error when REST over HTTP is selected.
 func (f *routerForm) restPort() int {
 	if strings.TrimSpace(f.RestPort) == "" {
 		return 0
@@ -134,7 +135,9 @@ func (f *routerForm) validate(requirePassword bool) bool {
 		f.Errors["portal_tag"] = "Keep the portal tag under 40 characters."
 	}
 	if f.restPort() < 0 {
-		f.Errors["rest_port"] = "Leave the web port empty for the default (80, or 443 with HTTPS)."
+		f.Errors["rest_port"] = "Enter the web port for REST (for example 10775); port 80 is not used automatically."
+	} else if f.Transport == database.TransportREST && (f.restPort() == 0 || f.restPort() == 80) {
+		f.Errors["rest_port"] = "REST over HTTP requires an explicit web port other than 80, such as 10775. Port 80 is disabled for safety."
 	}
 	return len(f.Errors) == 0
 }

@@ -342,8 +342,9 @@
             </select>
           </div>
           <div class="field">
-            <label for="erest_port">Web port for REST (optional)</label>
-            <input id="erest_port" name="rest_port" value="{{.Form.RestPort}}" placeholder="443" inputmode="numeric">
+            <label for="erest_port">Web port for REST</label>
+            <input id="erest_port" name="rest_port" value="{{.Form.RestPort}}" placeholder="10775 or 443" inputmode="numeric">
+            <span class="muted" style="font-size:.78rem">Required for HTTP REST; HTTPS defaults to 443. Port 80 is never selected automatically and is disabled for HTTP REST.</span>
           </div>
           <div class="field">
             <label for="eport">API port</label>

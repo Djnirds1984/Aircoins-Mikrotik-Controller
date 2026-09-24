@@ -371,6 +371,10 @@ func (h *Handler) apiRouterCreate(w http.ResponseWriter, r *http.Request) {
 	case strings.TrimSpace(req.Username) == "":
 		h.writeAPIError(w, http.StatusBadRequest, "validation", "username is required")
 		return
+	case database.NormalizeTransport(req.Transport) == database.TransportREST && (req.RestPort <= 0 || req.RestPort == 80):
+		h.writeAPIError(w, http.StatusBadRequest, "validation",
+			"rest_port is required for REST over HTTP; port 80 is not selected automatically")
+		return
 	}
 	router := database.Router{
 		Name:          strings.TrimSpace(req.Name),
@@ -433,6 +437,11 @@ func (h *Handler) apiRouterUpdate(w http.ResponseWriter, r *http.Request) {
 		strings.TrimSpace(req.Username) == "" {
 		h.writeAPIError(w, http.StatusBadRequest, "validation",
 			"name, host and username are required")
+		return
+	}
+	if database.NormalizeTransport(req.Transport) == database.TransportREST && (req.RestPort <= 0 || req.RestPort == 80) {
+		h.writeAPIError(w, http.StatusBadRequest, "validation",
+			"rest_port is required for REST over HTTP; port 80 is not selected automatically")
 		return
 	}
 	updated, err := h.db.Routers().Update(r.Context(), database.Router{
