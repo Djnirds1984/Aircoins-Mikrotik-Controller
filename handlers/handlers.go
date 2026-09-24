@@ -231,6 +231,11 @@ func (h *Handler) logRequests(next http.Handler) http.Handler {
 // securityHeaders applies conservative defaults. Styles are inlined in the
 // templates so the captive portal renders on clients that have no internet
 // access at all.
+//
+// script-src and connect-src must be stated explicitly: default-src is their
+// fallback, so default-src 'none' alone blocks the dashboard's inline
+// monitor script and its same-origin fetch() calls outright — the interface
+// dropdown then stays disabled forever, in every browser.
 func (h *Handler) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
@@ -239,7 +244,7 @@ func (h *Handler) securityHeaders(next http.Handler) http.Handler {
 		head.Set("X-Frame-Options", "DENY")
 		head.Set("Referrer-Policy", "no-referrer")
 		head.Set("Content-Security-Policy",
-			"default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+			"default-src 'none'; script-src 'self' 'unsafe-inline'; connect-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 		next.ServeHTTP(w, r)
 	})
 }
