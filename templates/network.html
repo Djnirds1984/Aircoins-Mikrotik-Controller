@@ -134,7 +134,9 @@
   </section>
   <section class="card" style="margin-top:16px">
     {{$form := .ServerForm}}
-    <details class="editor"{{if .Editing}} open{{end}}>
+    {{/* A failed submit must reopen the editor or the field errors below are
+         invisible: .Editing only covers edits, never a rejected create. */}}
+    <details class="editor"{{if or .Editing $form.Errors}} open{{end}}>
       <summary>{{if .Editing}}Edit hotspot server <span class="mono">{{.Editing}}</span>{{else}}Add a hotspot server{{end}}</summary>
       <form method="post" action="/network/{{$.Router.ID}}/servers{{if $.Editing}}/{{$.Editing}}{{end}}">
         {{template "csrf" $}}

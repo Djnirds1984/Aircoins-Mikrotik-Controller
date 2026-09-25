@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -253,5 +254,127 @@ func TestNetworkTabsIncludePoolsAndVLANs(t *testing.T) {
 	view.VLANs = []BridgeVLAN{{ID: "*2"}}
 	if view.Count(tabVLANs) != 1 {
 		t.Errorf("vlans count = %d, want 1", view.Count(tabVLANs))
+	}
+}
+
+func TestMissingNames(t *testing.T) {
+	available := []string{"ether1", "bridge-lan"}
+	tests := []struct {
+		name   string
+		wanted []string
+		want   string
+	}{
+		{"all present", []string{"ether1", "bridge-lan"}, ""},
+		{"one missing", []string{"ghost0"}, "ghost0"},
+		{"order kept", []string{"wlan9", "ether1", "vlan10"}, "wlan9,vlan10"},
+		{"nothing wanted", nil, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := strings.Join(missingNames(tc.wanted, available), ",")
+			if got != tc.want {
+				t.Errorf("missingNames(%v) = %q, want %q", tc.wanted, got, tc.want)
+			}
+		})
+	}
+}
+
+// The interface field is free text, so whatever the browser posts is
+// normalised here: stray spaces and empty entries must not survive to the
+// device, where "ether1, ether2" would be one unmatchable name.
+func TestHotspotServerFormNormalizesInterfaceList(t *testing.T) {
+	form := url.Values{
+		"name":      {"hs1"},
+		"interface": {" ether1 , bridge-lan ,, "},
+	}
+	r := httptest.NewRequest(http.MethodPost, "/network/1/servers", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	got := hotspotServerFormFromRequest(r).Interface
+	if got != "ether1,bridge-lan" {
+		t.Errorf("Interface = %q, want %q", got, "ether1,bridge-lan")
+	}
+
+	// A field that holds nothing but separators must collapse to empty, so the
+	// existing required-interface validation fires instead of the device.
+	blank := url.Values{"name": {"hs1"}, "interface": {" , "}}
+	r = httptest.NewRequest(http.MethodPost, "/network/1/servers", strings.NewReader(blank.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if got := hotspotServerFormFromRequest(r).Interface; got != "" {
+		t.Errorf("Interface = %q, want empty", got)
+	}
+	if (hotspotServerFormFromRequest(r)).validate(true) {
+		t.Error("a separator-only interface list should fail create validation")
+	}
+}
+
+// A device that will not list its interfaces must not block the write: the
+// check is an early warning, not a gate the transport can fail.
+func TestCheckServerInterfacesAllowsWriteWhenListUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/rest/system/identity" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"name":"Tolosa"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":404,"message":"not found"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := networkTestClient(t, server)
+	defer client.Close()
+
+	h := &Handler{log: slog.New(slog.DiscardHandler)}
+	form := &hotspotServerForm{Interface: "ether1", Errors: map[string]string{}}
+	if !h.checkServerInterfaces(context.Background(), client, form) {
+		t.Fatal("checkServerInterfaces should not block the write when the list read fails")
+	}
+	if len(form.Errors) != 0 {
+		t.Errorf("unexpected field errors: %v", form.Errors)
+	}
+}
+
+// A name the device does not have must be reported against the field, naming
+// both the offender and what the device offers - the message RouterOS would
+// never have spelled out.
+func TestCheckServerInterfacesReportsUnknownNames(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/rest/system/identity":
+			_, _ = w.Write([]byte(`{"name":"Tolosa"}`))
+		case r.URL.Path == "/rest/interface/print":
+			_, _ = w.Write([]byte(`[{"name":"ether1"},{"name":"bridge-lan"}]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":404,"message":"not found"}`))
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := networkTestClient(t, server)
+	defer client.Close()
+
+	h := &Handler{log: slog.New(slog.DiscardHandler)}
+	form := &hotspotServerForm{Interface: "ether1,ghost0", Errors: map[string]string{}}
+	if h.checkServerInterfaces(context.Background(), client, form) {
+		t.Fatal("checkServerInterfaces should refuse a write naming an interface the device lacks")
+	}
+	msg := form.Errors["interface"]
+	if !strings.Contains(msg, "ghost0") {
+		t.Errorf("field error %q does not name the missing interface", msg)
+	}
+	if !strings.Contains(msg, "ether1, bridge-lan") {
+		t.Errorf("field error %q does not list the available interfaces", msg)
+	}
+
+	// Everything the device has: no objection.
+	ok := &hotspotServerForm{Interface: "ether1,bridge-lan", Errors: map[string]string{}}
+	if !h.checkServerInterfaces(context.Background(), client, ok) {
+		t.Error("known interfaces should pass the check")
+	}
+	if len(ok.Errors) != 0 {
+		t.Errorf("unexpected field errors: %v", ok.Errors)
 	}
 }

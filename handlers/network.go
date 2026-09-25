@@ -363,8 +363,11 @@ func newHotspotServerForm() *hotspotServerForm {
 // hotspotServerFormFromRequest reads the submitted editor.
 func hotspotServerFormFromRequest(r *http.Request) *hotspotServerForm {
 	return &hotspotServerForm{
-		Name:             strings.TrimSpace(r.PostFormValue("name")),
-		Interface:        strings.TrimSpace(r.PostFormValue("interface")),
+		Name: strings.TrimSpace(r.PostFormValue("name")),
+		// The interface field accepts a comma separated list; normalise it here
+		// so "ether1, ether2" travels as "ether1,ether2" and the existence
+		// check sees exactly the entries the write would send.
+		Interface:        joinROSList(splitROSList(r.PostFormValue("interface"))),
 		AddressPool:      strings.TrimSpace(r.PostFormValue("address_pool")),
 		Profile:          strings.TrimSpace(r.PostFormValue("profile")),
 		IdleTimeout:      strings.TrimSpace(r.PostFormValue("idle_timeout")),
@@ -422,6 +425,60 @@ func (f *hotspotServerForm) validate(isCreate bool) bool {
 		f.Errors["comment"] = "Keep the comment under 200 characters."
 	}
 	return len(f.Errors) == 0
+}
+
+// missingNames returns the entries of wanted that are absent from available,
+// keeping the order the operator typed them. It is the pure core of the
+// interface check: the handler supplies the live device list, the form field
+// supplies what is about to be written.
+func missingNames(wanted, available []string) []string {
+	present := make(map[string]bool, len(available))
+	for _, name := range available {
+		present[name] = true
+	}
+	var missing []string
+	for _, name := range wanted {
+		if !present[name] {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
+// checkServerInterfaces verifies every interface the editor is about to write
+// against the interfaces the device actually has, so a typo or a stale
+// autocomplete entry is reported as a field error instead of the device's
+// "input does not match any value of interface" rejection. The interfaces
+// field is free text with a datalist, which the browser lets through
+// untouched; RouterOS is the first thing that can catch it, and its message
+// never says which name was wrong.
+//
+// It returns false when the form must not be sent, having recorded a field
+// error naming the offending entries and listing what the device offers. A
+// device that will not list its interfaces is not treated as a failure: the
+// write still goes ahead and the device judges it, exactly as before.
+func (h *Handler) checkServerInterfaces(ctx context.Context, client *MikrotikClient, form *hotspotServerForm) bool {
+	wanted := splitROSList(form.Interface)
+	if len(wanted) == 0 {
+		return true // create requires an interface; validate() already said so
+	}
+	available, err := client.InterfaceNames(ctx)
+	if err != nil {
+		h.log.Warn("cannot read the interface list to check the hotspot server form",
+			"error", err)
+		return true
+	}
+	missing := missingNames(wanted, available)
+	if len(missing) == 0 {
+		return true
+	}
+	summary := strings.Join(available, ", ")
+	if len(available) > 12 {
+		summary = strings.Join(available[:12], ", ") + ", …"
+	}
+	form.Errors["interface"] = "This device has no interface named " +
+		strings.Join(missing, ", ") + ". Available: " + summary + "."
+	return false
 }
 
 // spec converts the editor into the device layer spec.
@@ -1531,6 +1588,16 @@ func (h *Handler) HotspotServerCreate(w http.ResponseWriter, r *http.Request) {
 	callCtx, cancel := context.WithTimeout(r.Context(), h.cfg.APITimeout)
 	defer cancel()
 
+	// The interface list is free text, so RouterOS is normally the first to
+	// notice a name this device does not have - with a message that never says
+	// which one. Check before writing and report it as a field error instead.
+	if !h.checkServerInterfaces(callCtx, client, form) {
+		view := h.newNetworkPage(tabHotspotServers)
+		view.ServerForm = form
+		h.renderNetworkErrors(w, r, view)
+		return
+	}
+
 	id, err := client.AddHotspotServer(callCtx, form.spec())
 	if err != nil {
 		h.flashErr(w, r, networkPath(router.ID, tabHotspotServers),
@@ -1564,6 +1631,16 @@ func (h *Handler) HotspotServerUpdate(w http.ResponseWriter, r *http.Request) {
 
 	callCtx, cancel := context.WithTimeout(r.Context(), h.cfg.APITimeout)
 	defer cancel()
+
+	// Same free-text trap as the create form; a stale editor can name an
+	// interface that has since been renamed or removed.
+	if !h.checkServerInterfaces(callCtx, client, form) {
+		view := h.newNetworkPage(tabHotspotServers)
+		view.ServerForm = form
+		view.Editing = objectID
+		h.renderNetworkErrors(w, r, view)
+		return
+	}
 
 	if err := client.SetHotspotServer(callCtx, objectID, form.spec()); err != nil {
 		h.flashErr(w, r, networkPath(router.ID, tabHotspotServers),
