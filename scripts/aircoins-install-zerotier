@@ -23,7 +23,7 @@ case "${ID:-}" in
   *) echo "ZeroTier installer supports Debian, Ubuntu and Armbian only." >&2; exit 78 ;;
 esac
 case "$(uname -m)" in
-  x86_64|aarch64|arm64) ;;
+  x86_64|aarch64|arm64|armv7l) ;;
   *) echo "Unsupported architecture: $(uname -m)" >&2; exit 78 ;;
 esac
 if command -v zerotier-cli >/dev/null 2>&1; then

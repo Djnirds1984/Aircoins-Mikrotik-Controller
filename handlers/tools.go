@@ -165,8 +165,13 @@ func (h *Handler) ToolsZeroTierInstall(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	output, err := exec.CommandContext(ctx, "sudo", "-n", zeroTierInstallHelper).CombinedOutput()
 	if err != nil {
-		h.log.Error("host ZeroTier installation failed", "error", err, "output", strings.TrimSpace(string(output)))
-		h.flashAndRedirect(w, r, "/tools", "err", "ZeroTier installation failed. Check the controller log and verify the aircoins sudo rule.")
+		detail := truncateText(strings.TrimSpace(string(output)), 300)
+		h.log.Error("host ZeroTier installation failed", "error", err, "output", detail)
+		message := "ZeroTier installation failed. Check the controller log and verify the aircoins sudo rule."
+		if detail != "" {
+			message += " Details: " + detail
+		}
+		h.flashAndRedirect(w, r, "/tools", "err", message)
 		return
 	}
 	h.flashAndRedirect(w, r, "/tools", "ok", "ZeroTier installation completed on the panel host.")
