@@ -4,9 +4,24 @@
 # exposed to the aircoins service user through sudoers.
 set -eu
 
-if [ "$#" -ne 0 ]; then
-  echo "This installer does not accept arguments." >&2
+if [ "$#" -gt 2 ]; then
+  echo "Usage: $0 [info|listnetworks|join|leave] <network-id>" >&2
   exit 64
+fi
+if [ "$#" -eq 1 ]; then
+  case "$1" in
+    info|listnetworks) ;;
+    *) echo "Unsupported ZeroTier action." >&2; exit 64 ;;
+  esac
+elif [ "$#" -eq 2 ]; then
+  case "$1" in
+    join|leave) ;;
+    *) echo "Unsupported ZeroTier action." >&2; exit 64 ;;
+  esac
+  case "$2" in
+    [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]) ;;
+    *) echo "Invalid ZeroTier network ID." >&2; exit 64 ;;
+  esac
 fi
 if [ "$(id -u)" -ne 0 ]; then
   echo "This installer must run as root." >&2
@@ -26,10 +41,22 @@ case "$(uname -m)" in
   x86_64|aarch64|arm64|armv7l) ;;
   *) echo "Unsupported architecture: $(uname -m)" >&2; exit 78 ;;
 esac
+if [ "$#" -gt 0 ] && ! command -v zerotier-cli >/dev/null 2>&1; then
+  echo "ZeroTier is not installed on this host." >&2
+  exit 69
+fi
 if command -v zerotier-cli >/dev/null 2>&1; then
-  systemctl enable --now zerotier-one
-  echo "ZeroTier is already installed."
-  exit 0
+  case "${1:-install}" in
+    info) exec zerotier-cli -j info ;;
+    listnetworks) exec zerotier-cli -j listnetworks ;;
+    join) exec zerotier-cli join "$2" ;;
+    leave) exec zerotier-cli leave "$2" ;;
+    install)
+      systemctl enable --now zerotier-one
+      echo "ZeroTier is already installed."
+      exit 0
+      ;;
+  esac
 fi
 
 exec 9>/run/lock/aircoins-zerotier-install.lock

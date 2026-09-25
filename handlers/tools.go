@@ -100,7 +100,7 @@ func readHostZeroTierStatus(ctx context.Context) hostZeroTierStatus {
 	if _, err := os.Stat(zeroTierInstallHelper); err == nil {
 		result.HelperReady = true
 	}
-	cli, err := exec.LookPath("zerotier-cli")
+	_, err := exec.LookPath("zerotier-cli")
 	if err != nil {
 		return result
 	}
@@ -108,7 +108,7 @@ func readHostZeroTierStatus(ctx context.Context) hostZeroTierStatus {
 	if output, err := exec.CommandContext(ctx, "systemctl", "is-active", "zerotier-one").Output(); err == nil {
 		result.Running = strings.TrimSpace(string(output)) == "active"
 	}
-	output, err := exec.CommandContext(ctx, cli, "-j", "info").CombinedOutput()
+	output, err := exec.CommandContext(ctx, "sudo", "-n", zeroTierInstallHelper, "info").CombinedOutput()
 	if err != nil {
 		detail := truncateText(strings.TrimSpace(string(output)), 200)
 		if detail == "" {
@@ -127,7 +127,7 @@ func readHostZeroTierStatus(ctx context.Context) hostZeroTierStatus {
 		return result
 	}
 	result.NodeID, result.Online, result.Version = info.Address, info.Online, info.Version
-	output, err = exec.CommandContext(ctx, cli, "-j", "listnetworks").Output()
+	output, err = exec.CommandContext(ctx, "sudo", "-n", zeroTierInstallHelper, "listnetworks").CombinedOutput()
 	if err != nil {
 		return result
 	}
@@ -260,8 +260,7 @@ func (h *Handler) runZeroTierNetworkAction(w http.ResponseWriter, r *http.Reques
 		h.flashAndRedirect(w, r, "/tools", "err", "Enter a 16-character hexadecimal ZeroTier network ID.")
 		return
 	}
-	cli, err := exec.LookPath("zerotier-cli")
-	if err != nil {
+	if _, err := exec.LookPath("zerotier-cli"); err != nil {
 		h.flashAndRedirect(w, r, "/tools", "err", "Install ZeroTier before managing networks.")
 		return
 	}
@@ -271,7 +270,7 @@ func (h *Handler) runZeroTierNetworkAction(w http.ResponseWriter, r *http.Reques
 		h.flashAndRedirect(w, r, "/tools", "err", "ZeroTier service is not ready: "+err.Error())
 		return
 	}
-	output, err := exec.CommandContext(ctx, cli, action, networkID).CombinedOutput()
+	output, err := exec.CommandContext(ctx, "sudo", "-n", zeroTierInstallHelper, action, networkID).CombinedOutput()
 	if err != nil {
 		detail := truncateText(strings.TrimSpace(string(output)), 300)
 		if detail == "" {
