@@ -390,3 +390,26 @@ func TestNetworkTemplateRenders(t *testing.T) {
 		})
 	}
 }
+
+func TestHotspotInstallerListsLiveRouterInterfaces(t *testing.T) {
+	view := (&Handler{}).newNetworkPage(tabHotspotServers)
+	view.Router = sampleRouter()
+	view.Live = true
+	view.Interfaces = []InterfaceStats{
+		{Name: "ether1", Type: "ether"},
+		{Name: "bridge-HS", Type: "bridge"},
+	}
+	view.InstallerForm.Interface = "bridge-HS"
+
+	body := renderPage(t, "network.html", view)
+	for _, want := range []string{
+		`<select id="install-interface" name="interface" required>`,
+		`<option value="ether1">ether1 (ether)</option>`,
+		`<option value="bridge-HS" selected>bridge-HS (bridge)</option>`,
+		`Interfaces fetched live from this MikroTik router.`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("hotspot installer page is missing %q", want)
+		}
+	}
+}

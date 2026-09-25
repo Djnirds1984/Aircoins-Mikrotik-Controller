@@ -101,7 +101,14 @@
         <div class="form-grid">
           <div class="field">
             <label for="install-interface">Hotspot interface</label>
-            <input id="install-interface" name="interface" value="{{$install.Interface}}" placeholder="bridge-hotspot" required>
+            <select id="install-interface" name="interface" required>
+              <option value="">Select an interface</option>
+              {{$selectedInterface := $install.Interface}}
+              {{range .Interfaces}}
+              <option value="{{.Name}}"{{if eq .Name $selectedInterface}} selected{{end}}>{{.Name}}{{if .Type}} ({{.Type}}){{end}}</option>
+              {{end}}
+            </select>
+            <small>Interfaces fetched live from this MikroTik router.</small>
             {{with $install.Errors.interface}}<span class="error">{{.}}</span>{{end}}
           </div>
           <div class="field"><label for="install-address">Gateway address</label><input id="install-address" name="address" value="{{$install.Address}}" placeholder="10.5.50.1/24" required>{{with $install.Errors.address}}<span class="error">{{.}}</span>{{end}}</div>
