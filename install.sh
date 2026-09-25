@@ -352,8 +352,9 @@ ProtectSystem=false
 ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=$DATA_DIR
+# Do not set CapabilityBoundingSet= (empty): sudo must be able to acquire
+# CAP_SETUID/CAP_SETGID while entering the fixed root helper.
 AmbientCapabilities=
-CapabilityBoundingSet=
 
 [Install]
 WantedBy=multi-user.target
