@@ -220,9 +220,11 @@ func (h *Handler) runZeroTierInstallJob(job *zeroTierInstallJob) {
 		finishFailure(err, string(output))
 		return
 	}
-	update(85, "Starting the ZeroTier service...")
-	if _, err := exec.CommandContext(ctx, "systemctl", "enable", "--now", "zerotier-one").CombinedOutput(); err != nil {
-		finishFailure(err, "systemctl enable --now zerotier-one failed")
+	// The root helper already runs `systemctl enable --now zerotier-one`.
+	// Do not repeat that command as the unprivileged aircoins user.
+	update(85, "Verifying the ZeroTier service...")
+	if err := exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", "zerotier-one").Run(); err != nil {
+		finishFailure(err, "ZeroTier installer returned successfully, but zerotier-one is not active")
 		return
 	}
 	zeroTierJobs.Lock()
