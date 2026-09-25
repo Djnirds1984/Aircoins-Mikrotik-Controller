@@ -5,15 +5,36 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
 const zeroTierInstallHelper = "/usr/local/sbin/aircoins-install-zerotier"
+
+type zeroTierInstallJob struct {
+	ID      string
+	Percent int
+	Message string
+	Done    bool
+	Failed  bool
+	Error   string
+}
+
+var (
+	zeroTierJobID uint64
+	zeroTierJobs  = struct {
+		sync.RWMutex
+		items map[string]*zeroTierInstallJob
+	}{items: make(map[string]*zeroTierInstallJob)}
+)
 
 type hostZeroTierNetwork struct {
 	ID     string
@@ -41,7 +62,8 @@ type hostZeroTierStatus struct {
 
 type hostToolsPage struct {
 	page
-	ZeroTier hostZeroTierStatus
+	ZeroTier   hostZeroTierStatus
+	InstallJob *zeroTierInstallJob
 }
 
 func detectHostOS() (name, id, version, architecture string, supported bool) {
@@ -147,9 +169,16 @@ func validHostZeroTierNetworkID(value string) bool {
 func (h *Handler) Tools(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	h.render(w, r, http.StatusOK, "tools.html", &hostToolsPage{
-		page: page{Title: "Tools", Nav: "tools"}, ZeroTier: readHostZeroTierStatus(ctx),
-	})
+	view := &hostToolsPage{page: page{Title: "Tools", Nav: "tools"}, ZeroTier: readHostZeroTierStatus(ctx)}
+	if id := strings.TrimSpace(r.URL.Query().Get("install_job")); id != "" {
+		zeroTierJobs.RLock()
+		if job := zeroTierJobs.items[id]; job != nil {
+			copy := *job
+			view.InstallJob = &copy
+		}
+		zeroTierJobs.RUnlock()
+	}
+	h.render(w, r, http.StatusOK, "tools.html", view)
 }
 
 func (h *Handler) ToolsZeroTierInstall(w http.ResponseWriter, r *http.Request) {
@@ -161,20 +190,62 @@ func (h *Handler) ToolsZeroTierInstall(w http.ResponseWriter, r *http.Request) {
 		h.flashAndRedirect(w, r, "/tools", "err", "The Aircoins ZeroTier installer helper is missing. Rerun install.sh to provision it.")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+
+	job := &zeroTierInstallJob{ID: strconv.FormatUint(atomic.AddUint64(&zeroTierJobID, 1), 10), Percent: 5, Message: "Starting ZeroTier installation..."}
+	zeroTierJobs.Lock()
+	zeroTierJobs.items[job.ID] = job
+	zeroTierJobs.Unlock()
+	go h.runZeroTierInstallJob(job)
+	http.Redirect(w, r, "/tools?install_job="+job.ID, http.StatusSeeOther)
+}
+
+func (h *Handler) runZeroTierInstallJob(job *zeroTierInstallJob) {
+	update := func(percent int, message string) {
+		zeroTierJobs.Lock()
+		job.Percent, job.Message = percent, message
+		zeroTierJobs.Unlock()
+	}
+	finishFailure := func(err error, output string) {
+		detail := truncateText(strings.TrimSpace(output), 300)
+		zeroTierJobs.Lock()
+		job.Percent, job.Message, job.Done, job.Failed, job.Error = 100, "Installation failed.", true, true, detail
+		zeroTierJobs.Unlock()
+		h.log.Error("host ZeroTier installation failed", "error", err, "output", detail, "job", job.ID)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
+	update(20, "Running: curl -s https://install.zerotier.com | sudo bash")
 	output, err := exec.CommandContext(ctx, "sudo", "-n", zeroTierInstallHelper).CombinedOutput()
 	if err != nil {
-		detail := truncateText(strings.TrimSpace(string(output)), 300)
-		h.log.Error("host ZeroTier installation failed", "error", err, "output", detail)
-		message := "ZeroTier installation failed. Check the controller log and verify the aircoins sudo rule."
-		if detail != "" {
-			message += " Details: " + detail
-		}
-		h.flashAndRedirect(w, r, "/tools", "err", message)
+		finishFailure(err, string(output))
 		return
 	}
-	h.flashAndRedirect(w, r, "/tools", "ok", "ZeroTier installation completed on the panel host.")
+	update(85, "Starting the ZeroTier service...")
+	if _, err := exec.CommandContext(ctx, "systemctl", "enable", "--now", "zerotier-one").CombinedOutput(); err != nil {
+		finishFailure(err, "systemctl enable --now zerotier-one failed")
+		return
+	}
+	zeroTierJobs.Lock()
+	job.Percent, job.Message, job.Done = 100, "ZeroTier installation completed.", true
+	zeroTierJobs.Unlock()
+}
+
+func ensureHostZeroTierService(ctx context.Context) error {
+	if output, err := exec.CommandContext(ctx, "systemctl", "is-active", "zerotier-one").Output(); err == nil && strings.TrimSpace(string(output)) == "active" {
+		return nil
+	}
+	if _, err := exec.LookPath("zerotier-cli"); err != nil {
+		return errors.New("ZeroTier is not installed on this host")
+	}
+	output, err := exec.CommandContext(ctx, "sudo", "-n", zeroTierInstallHelper).CombinedOutput()
+	if err != nil {
+		detail := strings.TrimSpace(string(output))
+		if detail == "" {
+			detail = err.Error()
+		}
+		return errors.New("could not start zerotier-one: " + detail)
+	}
+	return nil
 }
 
 func (h *Handler) runZeroTierNetworkAction(w http.ResponseWriter, r *http.Request, action, success string) {
@@ -190,6 +261,10 @@ func (h *Handler) runZeroTierNetworkAction(w http.ResponseWriter, r *http.Reques
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
+	if err := ensureHostZeroTierService(ctx); err != nil {
+		h.flashAndRedirect(w, r, "/tools", "err", "ZeroTier service is not ready: "+err.Error())
+		return
+	}
 	output, err := exec.CommandContext(ctx, cli, action, networkID).CombinedOutput()
 	if err != nil {
 		h.log.Error("host ZeroTier action failed", "action", action, "error", err, "output", strings.TrimSpace(string(output)))
@@ -197,6 +272,20 @@ func (h *Handler) runZeroTierNetworkAction(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	h.flashAndRedirect(w, r, "/tools", "ok", success+" "+networkID+".")
+}
+
+func (h *Handler) ToolsZeroTierStart(w http.ResponseWriter, r *http.Request) {
+	if runtime.GOOS != "linux" {
+		h.flashAndRedirect(w, r, "/tools", "err", "ZeroTier service management is only available on Linux.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	if err := ensureHostZeroTierService(ctx); err != nil {
+		h.flashAndRedirect(w, r, "/tools", "err", "Could not start ZeroTier: "+err.Error())
+		return
+	}
+	h.flashAndRedirect(w, r, "/tools", "ok", "ZeroTier service started.")
 }
 
 func (h *Handler) ToolsZeroTierJoin(w http.ResponseWriter, r *http.Request) {

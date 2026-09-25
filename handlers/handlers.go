@@ -158,6 +158,7 @@ func (h *Handler) Routes() http.Handler {
 	// Host maintenance tools.
 	mux.HandleFunc("GET /tools", h.Tools)
 	mux.HandleFunc("POST /tools/zerotier/install", h.ToolsZeroTierInstall)
+	mux.HandleFunc("POST /tools/zerotier/start", h.ToolsZeroTierStart)
 	mux.HandleFunc("POST /tools/zerotier/join", h.ToolsZeroTierJoin)
 	mux.HandleFunc("POST /tools/zerotier/leave", h.ToolsZeroTierLeave)
 

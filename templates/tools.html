@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} · {{.PortalName}}</title>
 {{template "styles" .}}
+{{if and .InstallJob (not .InstallJob.Done)}}<meta http-equiv="refresh" content="2">{{end}}
 </head>
 <body>
 {{template "nav" .}}
@@ -15,13 +16,23 @@
     <a class="btn" href="/tools">Refresh status</a>
   </div>
 
+  {{if .InstallJob}}
+  <section class="card" style="margin-top:16px">
+    <h2>ZeroTier installation progress</h2>
+    <div class="alert {{if .InstallJob.Failed}}err{{else if .InstallJob.Done}}ok{{else}}warn{{end}}">{{.InstallJob.Message}}</div>
+    <progress max="100" value="{{.InstallJob.Percent}}" style="width:100%;height:18px">{{.InstallJob.Percent}}%</progress>
+    <div class="muted" style="font-size:.8rem">{{.InstallJob.Percent}}%{{if not .InstallJob.Done}} · this page refreshes automatically{{end}}</div>
+    {{if .InstallJob.Error}}<div class="error" style="margin-top:10px">{{.InstallJob.Error}}</div>{{end}}
+  </section>
+  {{end}}
+
   <section class="card">
     <div class="page-head" style="margin-bottom:12px">
       <div><h2>ZeroTier status</h2><p class="sub">Local installation, service, identity and joined networks</p></div>
       {{if .ZeroTier.Installed}}{{if .ZeroTier.Online}}<span class="badge green">online</span>{{else}}<span class="badge red">offline</span>{{end}}{{else}}<span class="badge slate">not installed</span>{{end}}
     </div>
 
-    {{if .ZeroTier.Error}}<div class="alert warn">{{.ZeroTier.Error}}</div>{{end}}
+    {{if .ZeroTier.Error}}<div class="alert warn">{{.ZeroTier.Error}}{{if and .ZeroTier.Installed (not .ZeroTier.Running)}} <form method="post" action="/tools/zerotier/start" class="inline-form" style="margin-top:10px">{{template "csrf" .}}<button class="btn" type="submit">Start ZeroTier service</button></form>{{end}}</div>{{end}}
     <div class="form-grid">
       <div class="field"><span class="muted">Operating system</span><div><strong>{{.ZeroTier.OSName}}</strong> {{if .ZeroTier.OSVersion}}<span class="muted">{{.ZeroTier.OSVersion}}</span>{{end}}</div><small>Architecture: {{.ZeroTier.Architecture}}</small></div>
       <div class="field"><span class="muted">Installed</span><div><strong>{{if .ZeroTier.Installed}}YES{{else}}NO{{end}}</strong></div></div>
@@ -68,7 +79,7 @@
         <small>Rerun <span class="mono">sudo ./install.sh</span> to provision the one-click installer.</small>
       {{else}}
         <form method="post" action="/tools/zerotier/install">
-          {{template "csrf" .}}<button class="btn primary" type="submit">Install ZeroTier</button>
+          {{template "csrf" .}}<button class="btn primary" type="submit"{{if and .InstallJob (not .InstallJob.Done)}} disabled{{end}}>{{if and .InstallJob (not .InstallJob.Done)}}Installing…{{else}}Install ZeroTier{{end}}</button>
         </form>
       {{end}}
     </section>
