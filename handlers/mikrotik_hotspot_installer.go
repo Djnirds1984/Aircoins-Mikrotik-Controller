@@ -80,7 +80,7 @@ func (c *MikrotikClient) InstallHotspot(ctx context.Context, spec HotspotInstall
 	}
 
 	profileSpec := HotspotServerProfileSpec{
-		Name: spec.ProfileName, HotspotAddress: spec.Address, DNSName: spec.DNSName,
+		Name: spec.ProfileName, HotspotAddress: hotspotProfileAddress(spec.Address), DNSName: spec.DNSName,
 		SMTPServer: spec.SMTPServer, LoginBy: "http-chap,https,http-pap",
 	}
 	if done, err := c.ensureHotspotServerProfile(ctx, profileSpec); err != nil {
@@ -231,6 +231,17 @@ func hotspotNetwork(address string) string {
 		return address
 	}
 	return prefix.Masked().String()
+}
+
+// hotspotProfileAddress strips the interface prefix from the configured gateway.
+// /ip/address accepts a CIDR, while /ip/hotspot/profile hotspot-address accepts
+// only the single IP address.
+func hotspotProfileAddress(address string) string {
+	prefix, err := netip.ParsePrefix(address)
+	if err != nil {
+		return address
+	}
+	return prefix.Addr().String()
 }
 
 // hotspotInstallerForm carries the values requested by RouterOS's interactive

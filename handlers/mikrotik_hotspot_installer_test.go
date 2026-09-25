@@ -34,6 +34,15 @@ func TestHotspotInstallerFormValidation(t *testing.T) {
 	}
 }
 
+func TestHotspotProfileAddress(t *testing.T) {
+	if got := hotspotProfileAddress("20.0.0.1/24"); got != "20.0.0.1" {
+		t.Fatalf("hotspotProfileAddress = %q, want 20.0.0.1", got)
+	}
+	if got := hotspotProfileAddress("20.0.0.1"); got != "20.0.0.1" {
+		t.Fatalf("plain hotspotProfileAddress = %q, want 20.0.0.1", got)
+	}
+}
+
 func TestHotspotInstallerFollowsRouterOSSetupOrder(t *testing.T) {
 	var commands []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +107,7 @@ func TestHotspotInstallerFollowsRouterOSSetupOrder(t *testing.T) {
 			t.Errorf("write %d = %q, want prefix %q", i, writes[i], want)
 		}
 	}
-	for _, want := range []string{`"address":"10.5.50.1/24"`, `"interface":"bridge1-HS"`, `"src-address":"10.5.50.0/24"`, `"dns-name":"hotspot.local"`, `"profile":"default"`} {
+	for _, want := range []string{`"address":"10.5.50.1/24"`, `"hotspot-address":"10.5.50.1"`, `"interface":"bridge1-HS"`, `"src-address":"10.5.50.0/24"`, `"dns-name":"hotspot.local"`, `"profile":"default"`} {
 		if !strings.Contains(strings.Join(writes, "\n"), want) {
 			t.Errorf("installer writes do not contain %s: %v", want, writes)
 		}
