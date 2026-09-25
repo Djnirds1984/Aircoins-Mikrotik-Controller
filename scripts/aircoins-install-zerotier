@@ -34,10 +34,7 @@ fi
 
 exec 9>/run/lock/aircoins-zerotier-install.lock
 flock -n 9 || { echo "Another ZeroTier installation is already running." >&2; exit 75; }
-installer="$(mktemp /tmp/aircoins-zerotier.XXXXXX)"
-trap 'rm -f "$installer"' EXIT INT TERM
-curl --proto '=https' --tlsv1.2 -fsSL https://install.zerotier.com -o "$installer"
-sh "$installer"
+curl -s https://install.zerotier.com | sudo bash
 command -v zerotier-cli >/dev/null 2>&1 || {
   echo "ZeroTier installer completed without creating zerotier-cli." >&2
   exit 1
