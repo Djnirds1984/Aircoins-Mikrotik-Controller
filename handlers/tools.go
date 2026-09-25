@@ -108,9 +108,13 @@ func readHostZeroTierStatus(ctx context.Context) hostZeroTierStatus {
 	if output, err := exec.CommandContext(ctx, "systemctl", "is-active", "zerotier-one").Output(); err == nil {
 		result.Running = strings.TrimSpace(string(output)) == "active"
 	}
-	output, err := exec.CommandContext(ctx, cli, "-j", "info").Output()
+	output, err := exec.CommandContext(ctx, cli, "-j", "info").CombinedOutput()
 	if err != nil {
-		result.Error = "zerotier-cli is installed, but its service did not return status."
+		detail := truncateText(strings.TrimSpace(string(output)), 200)
+		if detail == "" {
+			detail = err.Error()
+		}
+		result.Error = "zerotier-cli is installed, but its service did not return status: " + detail
 		return result
 	}
 	var info struct {
@@ -269,8 +273,12 @@ func (h *Handler) runZeroTierNetworkAction(w http.ResponseWriter, r *http.Reques
 	}
 	output, err := exec.CommandContext(ctx, cli, action, networkID).CombinedOutput()
 	if err != nil {
-		h.log.Error("host ZeroTier action failed", "action", action, "error", err, "output", strings.TrimSpace(string(output)))
-		h.flashAndRedirect(w, r, "/tools", "err", "ZeroTier could not "+action+" network "+networkID+".")
+		detail := truncateText(strings.TrimSpace(string(output)), 300)
+		if detail == "" {
+			detail = err.Error()
+		}
+		h.log.Error("host ZeroTier action failed", "action", action, "error", err, "output", detail)
+		h.flashAndRedirect(w, r, "/tools", "err", "ZeroTier could not "+action+" network "+networkID+": "+detail)
 		return
 	}
 	h.flashAndRedirect(w, r, "/tools", "ok", success+" "+networkID+".")
