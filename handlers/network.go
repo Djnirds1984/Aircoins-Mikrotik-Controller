@@ -1321,8 +1321,9 @@ func bridgeVLANFormFromRequest(r *http.Request) *bridgeVLANForm {
 	}
 }
 
-// validate checks the create editor: a bridge owns the entry, the VLAN IDs
-// decide what the entry is, and at least one port list makes it useful.
+// validate checks the create editor: a bridge owns the entry and the VLAN IDs
+// decide what the entry is. Tagged and untagged ports are optional; AddBridgeVLAN
+// omits either property when it is blank.
 func (f *bridgeVLANForm) validate() bool {
 	if f.Errors == nil {
 		f.Errors = map[string]string{}
@@ -1336,9 +1337,6 @@ func (f *bridgeVLANForm) validate() bool {
 		f.Errors["vlan_ids"] = "Enter a VLAN ID (100) or a range (100-120)."
 	} else if !validVLANIDSpec(f.VLANIDs) {
 		f.Errors["vlan_ids"] = "Use VLAN IDs from 1 to 4094, as 100, or as ranges like 100-120."
-	}
-	if f.Tagged == "" && f.Untagged == "" {
-		f.Errors["tagged"] = "List at least one tagged or untagged port for the VLAN."
 	}
 	if tooLong(f.Tagged) {
 		f.Errors["tagged"] = "Keep the tagged port list under 200 characters."

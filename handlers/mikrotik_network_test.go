@@ -152,6 +152,26 @@ func TestBridgeVLANDeviceLayer(t *testing.T) {
 		fields["tagged"] != "ether2" || fields["untagged"] != "ether3" {
 		t.Fatalf("unexpected PUT fields: %#v", fields)
 	}
+
+	if _, err := client.AddBridgeVLAN(ctx, "bridge1", "200", "", ""); err != nil {
+		t.Fatalf("AddBridgeVLAN without ports: %v", err)
+	}
+	if len(*puts) != 2 {
+		t.Fatalf("expected two PUT bodies, got %d", len(*puts))
+	}
+	fields = nil
+	if err := json.Unmarshal([]byte((*puts)[1]), &fields); err != nil {
+		t.Fatalf("portless PUT body %q is not an object: %v", (*puts)[1], err)
+	}
+	if fields["vlan-ids"] != "200" || fields["bridge"] != "bridge1" {
+		t.Fatalf("unexpected portless VLAN fields: %#v", fields)
+	}
+	if _, tagged := fields["tagged"]; tagged {
+		t.Errorf("portless VLAN unexpectedly sent tagged: %#v", fields)
+	}
+	if _, untagged := fields["untagged"]; untagged {
+		t.Errorf("portless VLAN unexpectedly sent untagged: %#v", fields)
+	}
 }
 
 func TestValidVLANIDSpec(t *testing.T) {
@@ -229,11 +249,8 @@ func TestBridgeVLANFormValidate(t *testing.T) {
 	}
 
 	noPorts := bridgeVLANForm{Bridge: "bridge1", VLANIDs: "100"}
-	if noPorts.validate() {
-		t.Fatal("vlan without any port should fail")
-	}
-	if noPorts.Errors["tagged"] == "" {
-		t.Error("missing tagged error")
+	if !noPorts.validate() {
+		t.Fatalf("vlan without ports should be accepted, got errors: %#v", noPorts.Errors)
 	}
 }
 

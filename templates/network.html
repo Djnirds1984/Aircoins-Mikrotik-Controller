@@ -1026,12 +1026,12 @@
           </div>
           <div class="field">
             <label for="vlan-tagged">Tagged ports</label>
-            <input id="vlan-tagged" name="tagged" value="{{$form.Tagged}}" list="iface-options" placeholder="ether2, sfp-sfpplus1">
+            <input id="vlan-tagged" name="tagged" value="{{$form.Tagged}}" list="iface-options" placeholder="ether2, sfp-sfpplus1 (optional)">
             {{with $form.Errors.tagged}}<span class="error">{{.}}</span>{{end}}
           </div>
           <div class="field">
             <label for="vlan-untagged">Untagged ports</label>
-            <input id="vlan-untagged" name="untagged" value="{{$form.Untagged}}" list="iface-options" placeholder="ether3">
+            <input id="vlan-untagged" name="untagged" value="{{$form.Untagged}}" list="iface-options" placeholder="ether3 (optional)">
             {{with $form.Errors.untagged}}<span class="error">{{.}}</span>{{end}}
           </div>
         </div>
