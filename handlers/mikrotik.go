@@ -729,23 +729,6 @@ func (c *MikrotikClient) InterfaceList(ctx context.Context) ([]InterfaceStats, e
 	return interfaces, nil
 }
 
-// InterfaceNames lists just the interface names of a device, the cheap read a
-// form does before it writes: the hotspot server editor validates what the
-// operator typed against it, the same way IPPoolNames backs the pool field.
-func (c *MikrotikClient) InterfaceNames(ctx context.Context) ([]string, error) {
-	reply, err := c.Run(ctx, "/interface/print", "=.proplist=name")
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, 0, len(reply.Re))
-	for _, row := range reply.Re {
-		if name := strings.TrimSpace(row["name"]); name != "" {
-			names = append(names, name)
-		}
-	}
-	return names, nil
-}
-
 // MonitorInterface monitors a specific interface for traffic data.
 func (c *MikrotikClient) MonitorInterface(ctx context.Context, id string) (InterfaceStats, error) {
 	reply, err := c.Run(ctx, "/interface/print", "=.id="+id,

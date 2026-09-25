@@ -20,6 +20,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/djnirds1984/aircoins-mikrotik-controller/database"
 )
@@ -427,58 +428,139 @@ func (f *hotspotServerForm) validate(isCreate bool) bool {
 	return len(f.Errors) == 0
 }
 
-// missingNames returns the entries of wanted that are absent from available,
-// keeping the order the operator typed them. It is the pure core of the
-// interface check: the handler supplies the live device list, the form field
-// supplies what is about to be written.
-func missingNames(wanted, available []string) []string {
-	present := make(map[string]bool, len(available))
-	for _, name := range available {
-		present[name] = true
+// refusedValueProperty reports which property the device rejected with the
+// RouterOS sentence "input does not match any value of <property>", or "" for
+// any other failure. The check runs on the decorated error text because no
+// sentinel tags this condition. The controller never refuses a write on its
+// own: only the device decides which interface names exist.
+func refusedValueProperty(err error) string {
+	if err == nil {
+		return ""
 	}
-	var missing []string
-	for _, name := range wanted {
-		if !present[name] {
-			missing = append(missing, name)
+	const marker = "does not match any value of"
+	lowered := strings.ToLower(err.Error())
+	at := strings.Index(lowered, marker)
+	if at < 0 {
+		return ""
+	}
+	// Mirror unknownParameterName: skip separator-only words so both
+	// "value of interface ..." and "value of: interface ..." parse.
+	for _, word := range strings.Fields(lowered[at+len(marker):]) {
+		if name := strings.Trim(word, ":='\"`.,()"); name != "" {
+			return name
 		}
 	}
-	return missing
+	return ""
 }
 
-// checkServerInterfaces verifies every interface the editor is about to write
-// against the interfaces the device actually has, so a typo or a stale
-// autocomplete entry is reported as a field error instead of the device's
-// "input does not match any value of interface" rejection. The interfaces
-// field is free text with a datalist, which the browser lets through
-// untouched; RouterOS is the first thing that can catch it, and its message
-// never says which name was wrong.
-//
-// It returns false when the form must not be sent, having recorded a field
-// error naming the offending entries and listing what the device offers. A
-// device that will not list its interfaces is not treated as a failure: the
-// write still goes ahead and the device judges it, exactly as before.
-func (h *Handler) checkServerInterfaces(ctx context.Context, client *MikrotikClient, form *hotspotServerForm) bool {
-	wanted := splitROSList(form.Interface)
-	if len(wanted) == 0 {
-		return true // create requires an interface; validate() already said so
+// visibleName folds an interface name to what the eye sees: case is ignored
+// and characters that occupy no width (zero-width spaces and joiners, soft
+// hyphens, byte order marks, non-breaking spaces) are dropped, so two names
+// that render identically compare equal. RouterOS compares bytes, and so does
+// the write; this is only ever used to EXPLAIN a refusal, never to allow one.
+func visibleName(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
+		if r == '\u00a0' || unicode.Is(unicode.Cf, r) || unicode.IsSpace(r) {
+			continue
+		}
+		b.WriteRune(r)
 	}
-	available, err := client.InterfaceNames(ctx)
-	if err != nil {
-		h.log.Warn("cannot read the interface list to check the hotspot server form",
+	return b.String()
+}
+
+// interfaceRefusalText explains a refusal the device has already made: it
+// quotes the value the operator sent and lists what the router reports, so the
+// two can be compared. The list is evidence, not a verdict - a name may be
+// missing from it for reasons the write itself would have settled. Ephemeral
+// "<...>" session interfaces are counted but not spelled out; they would only
+// push the interfaces an operator binds a hotspot to out of view. An empty
+// list still yields the refusal itself, which is the fact that matters.
+func interfaceRefusalText(wanted string, available []string) string {
+	text := "The device refused interface \"" + wanted + "\"."
+	if len(available) == 0 {
+		return text
+	}
+	var shown []string
+	sessions := 0
+	for _, name := range available {
+		if strings.HasPrefix(name, "<") {
+			sessions++
+			continue
+		}
+		shown = append(shown, name)
+	}
+	if len(shown) > 20 {
+		shown = append(shown[:20:20], "…")
+	}
+	text += " Interfaces this router reports: " + strings.Join(shown, ", ") + "."
+	if sessions > 0 {
+		text += " (omitted " + strconv.Itoa(sessions) + " dynamic session interfaces)"
+	}
+
+	// Diagnose against the list for the operator's benefit only: the device
+	// has already refused the write, and this can be wrong without costing
+	// anything. splitROSList splits a multi-interface field the same way the
+	// write did, so "ether1, ghost0" is judged entry by entry.
+	exact := make(map[string]bool, len(available))
+	folded := make(map[string]bool, len(available))
+	for _, name := range available {
+		exact[name] = true
+		if key := visibleName(name); key != "" {
+			folded[key] = true
+		}
+	}
+	var absent, lookAlike []string
+	for _, name := range splitROSList(wanted) {
+		switch {
+		case exact[name]:
+		case folded[visibleName(name)]:
+			lookAlike = append(lookAlike, name)
+		default:
+			absent = append(absent, name)
+		}
+	}
+	if len(absent) > 0 {
+		text += " Not among the names the device reports: " + strings.Join(absent, ", ") + "."
+	}
+	if len(lookAlike) > 0 {
+		text += " " + strings.Join(lookAlike, ", ") +
+			" looks like an entry in that list but is not the same text: pick it from the list instead of typing it."
+	}
+	if len(absent) == 0 && len(lookAlike) == 0 {
+		text += " The device lists this name, so it may have changed since the list was read: reload the page and try again."
+	}
+	return text
+}
+
+// explainInterfaceRefusal turns a device refusal of an interface value into a
+// field error and reports whether it did: false means the failure is something
+// else, and the caller flashes the device's message unchanged. The write
+// always reaches the device first - this runs only after RouterOS itself has
+// said no, and the list it shows comes from the same InterfaceList the
+// editor's datalist was built from. A list that cannot be read costs the
+// listing, never the explanation: the refusal itself is already established.
+func (h *Handler) explainInterfaceRefusal(ctx context.Context, client *MikrotikClient, form *hotspotServerForm, cause error) bool {
+	if refusedValueProperty(cause) != "interface" {
+		return false
+	}
+	h.log.Warn("device refused an interface value",
+		"interface", form.Interface, "cause", cause)
+	text := interfaceRefusalText(form.Interface, nil)
+	if interfaces, err := client.InterfaceList(ctx); err != nil {
+		h.log.Warn("cannot read the interface list to explain a device refusal",
 			"error", err)
-		return true
+	} else {
+		names := make([]string, 0, len(interfaces))
+		for _, iface := range interfaces {
+			if iface.Name != "" {
+				names = append(names, iface.Name)
+			}
+		}
+		text = interfaceRefusalText(form.Interface, names)
 	}
-	missing := missingNames(wanted, available)
-	if len(missing) == 0 {
-		return true
-	}
-	summary := strings.Join(available, ", ")
-	if len(available) > 12 {
-		summary = strings.Join(available[:12], ", ") + ", …"
-	}
-	form.Errors["interface"] = "This device has no interface named " +
-		strings.Join(missing, ", ") + ". Available: " + summary + "."
-	return false
+	form.Errors["interface"] = text
+	return true
 }
 
 // spec converts the editor into the device layer spec.
@@ -1588,18 +1670,18 @@ func (h *Handler) HotspotServerCreate(w http.ResponseWriter, r *http.Request) {
 	callCtx, cancel := context.WithTimeout(r.Context(), h.cfg.APITimeout)
 	defer cancel()
 
-	// The interface list is free text, so RouterOS is normally the first to
-	// notice a name this device does not have - with a message that never says
-	// which one. Check before writing and report it as a field error instead.
-	if !h.checkServerInterfaces(callCtx, client, form) {
-		view := h.newNetworkPage(tabHotspotServers)
-		view.ServerForm = form
-		h.renderNetworkErrors(w, r, view)
-		return
-	}
-
+	// The write always reaches the device: only RouterOS knows which
+	// interface names exist, and a controller-side snapshot must never
+	// invent a refusal it did not make. When the device does reject the
+	// value, the same rejection is explained as a field error.
 	id, err := client.AddHotspotServer(callCtx, form.spec())
 	if err != nil {
+		if h.explainInterfaceRefusal(callCtx, client, form, err) {
+			view := h.newNetworkPage(tabHotspotServers)
+			view.ServerForm = form
+			h.renderNetworkErrors(w, r, view)
+			return
+		}
 		h.flashErr(w, r, networkPath(router.ID, tabHotspotServers),
 			"Creating the hotspot server failed", err)
 		return
@@ -1632,17 +1714,16 @@ func (h *Handler) HotspotServerUpdate(w http.ResponseWriter, r *http.Request) {
 	callCtx, cancel := context.WithTimeout(r.Context(), h.cfg.APITimeout)
 	defer cancel()
 
-	// Same free-text trap as the create form; a stale editor can name an
-	// interface that has since been renamed or removed.
-	if !h.checkServerInterfaces(callCtx, client, form) {
-		view := h.newNetworkPage(tabHotspotServers)
-		view.ServerForm = form
-		view.Editing = objectID
-		h.renderNetworkErrors(w, r, view)
-		return
-	}
-
+	// Same principle as the create form: send it, and explain a refusal the
+	// device actually made - a stale editor must not block a valid write.
 	if err := client.SetHotspotServer(callCtx, objectID, form.spec()); err != nil {
+		if h.explainInterfaceRefusal(callCtx, client, form, err) {
+			view := h.newNetworkPage(tabHotspotServers)
+			view.ServerForm = form
+			view.Editing = objectID
+			h.renderNetworkErrors(w, r, view)
+			return
+		}
 		h.flashErr(w, r, networkPath(router.ID, tabHotspotServers),
 			"Updating the hotspot server failed", err)
 		return

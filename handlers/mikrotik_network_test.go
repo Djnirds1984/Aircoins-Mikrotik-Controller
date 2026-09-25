@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -257,25 +259,24 @@ func TestNetworkTabsIncludePoolsAndVLANs(t *testing.T) {
 	}
 }
 
-func TestMissingNames(t *testing.T) {
-	available := []string{"ether1", "bridge-lan"}
-	tests := []struct {
-		name   string
-		wanted []string
-		want   string
-	}{
-		{"all present", []string{"ether1", "bridge-lan"}, ""},
-		{"one missing", []string{"ghost0"}, "ghost0"},
-		{"order kept", []string{"wlan9", "ether1", "vlan10"}, "wlan9,vlan10"},
-		{"nothing wanted", nil, ""},
+// Two names that render identically must fold together, so a refusal caused by
+// invisible bytes (a zero-width character pasted into the field, a soft hyphen
+// in the device's name, a stray non-breaking space) can be pointed out instead
+// of looking impossible.
+func TestVisibleName(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"ether1", "ether1"},
+		{" Bridge1-HS ", "bridge1-hs"},
+		{"bridge1\u200b-HS", "bridge1-hs"},
+		{"bridge1\u00ad-HS", "bridge1-hs"},
+		{"bridge1\u00a0-HS", "bridge1-hs"},
+		{"bridge1\u200bHS", "bridge1hs"},
+		{"", ""},
 	}
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := strings.Join(missingNames(tc.wanted, available), ",")
-			if got != tc.want {
-				t.Errorf("missingNames(%v) = %q, want %q", tc.wanted, got, tc.want)
-			}
-		})
+		if got := visibleName(tc.in); got != tc.want {
+			t.Errorf("visibleName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 
@@ -308,73 +309,165 @@ func TestHotspotServerFormNormalizesInterfaceList(t *testing.T) {
 	}
 }
 
-// A device that will not list its interfaces must not block the write: the
-// check is an early warning, not a gate the transport can fail.
-func TestCheckServerInterfacesAllowsWriteWhenListUnavailable(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/rest/system/identity" {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"name":"Tolosa"}`))
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":404,"message":"not found"}`))
-	}))
-	t.Cleanup(server.Close)
-
-	client := networkTestClient(t, server)
-	defer client.Close()
-
-	h := &Handler{log: slog.New(slog.DiscardHandler)}
-	form := &hotspotServerForm{Interface: "ether1", Errors: map[string]string{}}
-	if !h.checkServerInterfaces(context.Background(), client, form) {
-		t.Fatal("checkServerInterfaces should not block the write when the list read fails")
+// The controller must recognise the device's own refusal sentence and nothing
+// else: no sentinel tags this condition, so the match runs on the decorated
+// error text. Returning the property name keeps the door open for other
+// properties to be explained the same way later.
+func TestRefusedValueProperty(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"journal sentence", errors.New("input does not match any value of interface Bad Request at remote.oxapsph.com:10775 (/ip/hotspot/add)"), "interface"},
+		{"other property", errors.New("failure: input does not match any value of address-pool"), "address-pool"},
+		{"separator variant", errors.New("input does not match any value of: interface"), "interface"},
+		{"unknown parameter", errors.New("unknown parameter comment Bad Request at host (/ip/hotspot/add)"), ""},
+		{"generic device failure", errors.New("failure: cannot apply this configuration"), ""},
+		{"nil", nil, ""},
 	}
-	if len(form.Errors) != 0 {
-		t.Errorf("unexpected field errors: %v", form.Errors)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := refusedValueProperty(tc.err); got != tc.want {
+				t.Errorf("refusedValueProperty(%v) = %q, want %q", tc.err, got, tc.want)
+			}
+		})
 	}
 }
 
-// A name the device does not have must be reported against the field, naming
-// both the offender and what the device offers - the message RouterOS would
-// never have spelled out.
-func TestCheckServerInterfacesReportsUnknownNames(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/rest/system/identity":
-			_, _ = w.Write([]byte(`{"name":"Tolosa"}`))
-		case r.URL.Path == "/rest/interface/print":
-			_, _ = w.Write([]byte(`[{"name":"ether1"},{"name":"bridge-lan"}]`))
-		default:
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"error":404,"message":"not found"}`))
+func TestInterfaceRefusalText(t *testing.T) {
+	// The list is evidence under the device's verdict: the refused value is
+	// quoted, static interfaces are listed, ephemeral sessions only counted.
+	got := interfaceRefusalText("ghost0", []string{"ether1", "bridge-lan", "<pppoe-a>", "<pppoe-b>"})
+	for _, want := range []string{
+		`The device refused interface "ghost0".`,
+		"ether1, bridge-lan",
+		"omitted 2 dynamic session interfaces",
+		"Not among the names the device reports: ghost0",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("text missing %q: %s", want, got)
 		}
-	}))
-	t.Cleanup(server.Close)
-
-	client := networkTestClient(t, server)
-	defer client.Close()
-
-	h := &Handler{log: slog.New(slog.DiscardHandler)}
-	form := &hotspotServerForm{Interface: "ether1,ghost0", Errors: map[string]string{}}
-	if h.checkServerInterfaces(context.Background(), client, form) {
-		t.Fatal("checkServerInterfaces should refuse a write naming an interface the device lacks")
 	}
-	msg := form.Errors["interface"]
-	if !strings.Contains(msg, "ghost0") {
-		t.Errorf("field error %q does not name the missing interface", msg)
-	}
-	if !strings.Contains(msg, "ether1, bridge-lan") {
-		t.Errorf("field error %q does not list the available interfaces", msg)
+	if strings.Contains(got, "<pppoe-a>") {
+		t.Errorf("session interfaces must not be spelled out: %s", got)
 	}
 
-	// Everything the device has: no objection.
-	ok := &hotspotServerForm{Interface: "ether1,bridge-lan", Errors: map[string]string{}}
-	if !h.checkServerInterfaces(context.Background(), client, ok) {
-		t.Error("known interfaces should pass the check")
+	// The device lists something that only LOOKS like what was sent - the
+	// classic case of a zero-width character or a soft hyphen arriving with a
+	// copy-paste. Picking the entry from the list is the fix.
+	got = interfaceRefusalText("bridge1-HS", []string{"ether1", "bridge1\u200b-HS"})
+	if !strings.Contains(got, "pick it from the list") {
+		t.Errorf("a look-alike name should be called out: %s", got)
 	}
-	if len(ok.Errors) != 0 {
-		t.Errorf("unexpected field errors: %v", ok.Errors)
+	if strings.Contains(got, "Not among the names") {
+		t.Errorf("a look-alike name is not absent: %s", got)
 	}
+
+	// Byte-for-byte present, yet refused: the snapshot is stale.
+	got = interfaceRefusalText("bridge1-HS", []string{"ether1", "bridge1-HS"})
+	if !strings.Contains(got, "reload the page") {
+		t.Errorf("an exact match should point at a stale list: %s", got)
+	}
+
+	// A multi-interface field is judged entry by entry, the way the write was.
+	got = interfaceRefusalText("ether1,ghost0", []string{"ether1", "bridge-lan"})
+	if !strings.Contains(got, "Not among the names the device reports: ghost0") {
+		t.Errorf("the absent entry should be named: %s", got)
+	}
+	if strings.Contains(got, "Not among the names the device reports: ether1") {
+		t.Errorf("the present entry must not be listed as absent: %s", got)
+	}
+
+	// Nothing read: the refusal still stands alone.
+	if got := interfaceRefusalText("bridge1-HS", nil); got != `The device refused interface "bridge1-HS".` {
+		t.Errorf("empty-list text = %q", got)
+	}
+
+	// A long list is capped so the field error stays readable.
+	long := make([]string, 0, 25)
+	for i := 1; i <= 25; i++ {
+		long = append(long, fmt.Sprintf("iface%02d", i))
+	}
+	got = interfaceRefusalText("nope", long)
+	if !strings.Contains(got, "…") || strings.Contains(got, "iface21") {
+		t.Errorf("list of %d not capped at 20: %s", len(long), got)
+	}
+}
+
+// Only a refusal the DEVICE made becomes a field error - and it becomes one
+// even when the interface list cannot be read, because the refusal is the
+// established fact and the list is merely evidence. An unrelated device
+// failure is never relabelled.
+func TestExplainInterfaceRefusal(t *testing.T) {
+	refusal := errors.New("input does not match any value of interface Bad Request at host (/ip/hotspot/add)")
+
+	t.Run("readable list", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.URL.Path == "/rest/system/identity":
+				_, _ = w.Write([]byte(`{"name":"Tolosa"}`))
+			case r.URL.Path == "/rest/interface/print":
+				_, _ = w.Write([]byte(`[{"name":"ether1"},{"name":"bridge-lan"}]`))
+			default:
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":404,"message":"not found"}`))
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		client := networkTestClient(t, server)
+		defer client.Close()
+
+		h := &Handler{log: slog.New(slog.DiscardHandler)}
+		form := &hotspotServerForm{Interface: "ghost0", Errors: map[string]string{}}
+		if !h.explainInterfaceRefusal(context.Background(), client, form, refusal) {
+			t.Fatal("a device interface refusal must become a field error")
+		}
+		msg := form.Errors["interface"]
+		for _, want := range []string{"ghost0", "ether1, bridge-lan"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("field error %q is missing %q", msg, want)
+			}
+		}
+	})
+
+	t.Run("unreadable list", func(t *testing.T) {
+		// networkStub404s /rest/interface/print: the listing is lost, the
+		// explanation is not - the write already happened, and dropping to the
+		// cryptic flash would hide a fact the controller holds.
+		server, _ := networkStub(t)
+		client := networkTestClient(t, server)
+		defer client.Close()
+
+		h := &Handler{log: slog.New(slog.DiscardHandler)}
+		form := &hotspotServerForm{Interface: "ghost0", Errors: map[string]string{}}
+		if !h.explainInterfaceRefusal(context.Background(), client, form, refusal) {
+			t.Fatal("an unreadable list must not swallow the device's refusal")
+		}
+		msg := form.Errors["interface"]
+		if !strings.Contains(msg, `refused interface "ghost0"`) {
+			t.Errorf("refusal-only text missing: %q", msg)
+		}
+		if strings.Contains(msg, "Interfaces this router reports") {
+			t.Errorf("no list was read, none may be claimed: %q", msg)
+		}
+	})
+
+	t.Run("other failures are not rewritten", func(t *testing.T) {
+		server, _ := networkStub(t)
+		client := networkTestClient(t, server)
+		defer client.Close()
+
+		h := &Handler{log: slog.New(slog.DiscardHandler)}
+		form := &hotspotServerForm{Interface: "ether1", Errors: map[string]string{}}
+		if h.explainInterfaceRefusal(context.Background(), client, form,
+			errors.New("failure: cannot apply this configuration")) {
+			t.Error("an unrelated failure must be flashed unchanged, not relabelled")
+		}
+		if len(form.Errors) != 0 {
+			t.Errorf("unexpected field errors: %v", form.Errors)
+		}
+	})
 }
