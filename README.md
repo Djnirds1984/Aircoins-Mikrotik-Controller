@@ -15,7 +15,13 @@ ADDR=:8080 DB_PATH=data/aircoins.db ./aircoins-controller
 ```
 
 Open `http://localhost:8080/` (dashboard), `/routers`,
-`/vouchers`, `/sessions`, `/portal/login`, `/healthz`.
+`/vouchers`, `/sessions`, `/tools`, `/portal/login`, `/healthz`.
+The Tools page manages ZeroTier on the Debian/Ubuntu/Armbian host running
+this panel: it shows installation/service/node/network status, offers a
+restricted one-click installer when `zerotier-cli` is absent, and can join
+or leave a validated 16-character ZeroTier network. Rerun `sudo ./install.sh`
+after upgrading an existing deployment to provision its no-argument root
+helper and matching sudoers rule.
 
 ## Configuration (environment)
 

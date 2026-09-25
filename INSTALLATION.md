@@ -80,6 +80,15 @@ in `/etc/aircoins/aircoins.env`, then `systemctl restart aircoins`.
    `http://<board-ip>:8080/portal/login?mac=$(mac)&ip=$(ip)&...`
    (full snippet in `README.md`).
 5. Generate voucher batches under `/vouchers`.
+6. `/tools` manages ZeroTier on this panel host. When the official
+   `zerotier-cli` is absent, the page offers an Install button. The button
+   invokes only the root-owned `/usr/local/sbin/aircoins-install-zerotier`
+   helper, which `install.sh` permits for the `aircoins` user through
+   `/etc/sudoers.d/aircoins-tools`. The helper accepts no arguments and
+   installs from ZeroTier's official `https://install.zerotier.com` script.
+   On an existing deployment, rerun `sudo ./install.sh` to provision this
+   helper and its updated systemd unit. The page can then show service and
+   node status, and Join/Leave networks without accepting shell input.
 
 Paths: binary `/opt/aircoins/aircoins-controller`, DB
 `/var/lib/aircoins/aircoins.db`, master key

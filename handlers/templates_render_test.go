@@ -391,6 +391,53 @@ func TestNetworkTemplateRenders(t *testing.T) {
 	}
 }
 
+func TestToolsTemplateShowsHostZeroTierState(t *testing.T) {
+	view := &hostToolsPage{page: samplePage("Tools", "tools"), ZeroTier: hostZeroTierStatus{
+		OSName: "Debian GNU/Linux 12", OSID: "debian", Architecture: "aarch64",
+		SupportedOS: true, Installed: true, Running: true, Online: true,
+		NodeID: "b8034f7f60", Version: "1.14.2",
+		Networks: []hostZeroTierNetwork{{ID: "e4da7455b23ac67d", Name: "CITYCONNECT", Type: "Public", Status: "OK", IPs: []string{"10.242.137.78/16"}}},
+	}}
+	body := renderPage(t, "tools.html", view)
+	for _, want := range []string{
+		`<a href="/tools" class="active">Tools</a>`, `b8034f7f60`, `RUNNING`,
+		`CITYCONNECT`, `e4da7455b23ac67d`, `10.242.137.78/16`, `Already installed.`,
+		`action="/tools/zerotier/leave"`, `action="/tools/zerotier/join"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("installed tools page is missing %q", want)
+		}
+	}
+}
+
+func TestToolsTemplateShowsInstallButtonOnlyWhenMissing(t *testing.T) {
+	view := &hostToolsPage{page: samplePage("Tools", "tools"), ZeroTier: hostZeroTierStatus{
+		OSName: "Ubuntu 24.04", OSID: "ubuntu", Architecture: "x86_64", SupportedOS: true, HelperReady: true,
+	}}
+	body := renderPage(t, "tools.html", view)
+	for _, want := range []string{`action="/tools/zerotier/install"`, `>Install ZeroTier</button>`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("uninstalled tools page is missing %q", want)
+		}
+	}
+	if strings.Contains(body, "Already installed") {
+		t.Error("uninstalled tools page claims ZeroTier is installed")
+	}
+}
+
+func TestHostZeroTierNetworkIDValidation(t *testing.T) {
+	for _, value := range []string{"805c2e21c0000001", "ABCDEF0123456789"} {
+		if !validHostZeroTierNetworkID(value) {
+			t.Errorf("valid network ID rejected: %q", value)
+		}
+	}
+	for _, value := range []string{"", "805c2e21c000000", "805c2e21c00000011", "805c2e21c000000z"} {
+		if validHostZeroTierNetworkID(value) {
+			t.Errorf("invalid network ID accepted: %q", value)
+		}
+	}
+}
+
 func TestHotspotInstallerListsLiveRouterInterfaces(t *testing.T) {
 	view := (&Handler{}).newNetworkPage(tabHotspotServers)
 	view.Router = sampleRouter()

@@ -155,6 +155,12 @@ func (h *Handler) Routes() http.Handler {
 	// Session history.
 	mux.HandleFunc("GET /sessions", h.SessionsList)
 
+	// Host maintenance tools.
+	mux.HandleFunc("GET /tools", h.Tools)
+	mux.HandleFunc("POST /tools/zerotier/install", h.ToolsZeroTierInstall)
+	mux.HandleFunc("POST /tools/zerotier/join", h.ToolsZeroTierJoin)
+	mux.HandleFunc("POST /tools/zerotier/leave", h.ToolsZeroTierLeave)
+
 	// Voucher engine.
 	mux.HandleFunc("GET /vouchers", h.VouchersList)
 	mux.HandleFunc("GET /vouchers/export.csv", h.VouchersExport)

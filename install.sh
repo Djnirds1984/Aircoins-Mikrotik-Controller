@@ -142,6 +142,7 @@ if (( DO_UNINSTALL )); then
   log "Removing $SERVICE_NAME ..."
   systemctl disable --now "$SERVICE_NAME" 2>/dev/null || true
   rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
+  rm -f /etc/sudoers.d/aircoins-tools /usr/local/sbin/aircoins-install-zerotier
   systemctl daemon-reload 2>/dev/null || true
   rm -rf "$INSTALL_DIR"
   id "$SVC_USER" >/dev/null 2>&1 && userdel "$SVC_USER" 2>/dev/null || true
@@ -157,7 +158,7 @@ export DEBIAN_FRONTEND=noninteractive
 log "Installing OS dependencies (apt) ..."
 apt-get update -y
 apt-get install -y --no-install-recommends \
-  ca-certificates curl git tar gzip procps \
+  ca-certificates curl git tar gzip procps sudo \
   build-essential pkg-config \
   ufw iptables iproute2 systemd
 
@@ -316,6 +317,16 @@ else
 fi
 chown root:"$SVC_USER" "$ENV_FILE" 2>/dev/null || true
 
+TOOLS_HELPER="/usr/local/sbin/aircoins-install-zerotier"
+log "Installing the restricted host-tools helper ..."
+install -o root -g root -m 0755 "$SRC_DIR/scripts/aircoins-install-zerotier" "$TOOLS_HELPER"
+SUDOERS_FILE="/etc/sudoers.d/aircoins-tools"
+printf '%s ALL=(root) NOPASSWD: %s\n' "$SVC_USER" "$TOOLS_HELPER" > "$SUDOERS_FILE"
+chown root:root "$SUDOERS_FILE"
+chmod 0440 "$SUDOERS_FILE"
+visudo -cf "$SUDOERS_FILE" >/dev/null
+
+
 UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 log "Installing systemd unit $UNIT_FILE ..."
 cat > "$UNIT_FILE" <<EOF
@@ -333,8 +344,11 @@ EnvironmentFile=$ENV_FILE
 ExecStart=$INSTALL_DIR/$APP_NAME
 Restart=on-failure
 RestartSec=3
-NoNewPrivileges=true
-ProtectSystem=strict
+# The controller itself accepts no general privilege escalation. The one
+# allowed sudo target is the no-argument, root-owned installer helper above.
+NoNewPrivileges=false
+# The helper must be able to write package files while the controller is idle.
+ProtectSystem=false
 ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=$DATA_DIR

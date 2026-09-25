@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · {{.PortalName}}</title>
+{{template "styles" .}}
+</head>
+<body>
+{{template "nav" .}}
+<main class="wrap">
+  {{template "flash" .}}
+  <div class="page-head">
+    <div><h1>Tools</h1><p class="sub">Host utilities for the Armbian, Ubuntu or Debian machine running this panel.</p></div>
+    <a class="btn" href="/tools">Refresh status</a>
+  </div>
+
+  <section class="card">
+    <div class="page-head" style="margin-bottom:12px">
+      <div><h2>ZeroTier status</h2><p class="sub">Local installation, service, identity and joined networks</p></div>
+      {{if .ZeroTier.Installed}}{{if .ZeroTier.Online}}<span class="badge green">online</span>{{else}}<span class="badge red">offline</span>{{end}}{{else}}<span class="badge slate">not installed</span>{{end}}
+    </div>
+
+    {{if .ZeroTier.Error}}<div class="alert warn">{{.ZeroTier.Error}}</div>{{end}}
+    <div class="form-grid">
+      <div class="field"><span class="muted">Operating system</span><div><strong>{{.ZeroTier.OSName}}</strong> {{if .ZeroTier.OSVersion}}<span class="muted">{{.ZeroTier.OSVersion}}</span>{{end}}</div><small>Architecture: {{.ZeroTier.Architecture}}</small></div>
+      <div class="field"><span class="muted">Installed</span><div><strong>{{if .ZeroTier.Installed}}YES{{else}}NO{{end}}</strong></div></div>
+      <div class="field"><span class="muted">Service</span><div><strong>{{if .ZeroTier.Running}}RUNNING{{else}}STOPPED{{end}}</strong></div></div>
+      <div class="field"><span class="muted">Node ID</span><div class="mono">{{if .ZeroTier.NodeID}}{{.ZeroTier.NodeID}}{{else}}—{{end}}</div>{{if .ZeroTier.Version}}<small>Version {{.ZeroTier.Version}}</small>{{end}}</div>
+    </div>
+
+    <h3 style="margin-top:20px">Joined networks</h3>
+    {{if .ZeroTier.Networks}}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Network</th><th>Type</th><th>Interface / IP</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+        {{range .ZeroTier.Networks}}
+          <tr>
+            <td><strong>{{if .Name}}{{.Name}}{{else}}ZeroTier network{{end}}</strong><div class="mono muted">{{.ID}}</div></td>
+            <td>{{default .Type "unknown"}}</td>
+            <td class="mono">{{range $i, $ip := .IPs}}{{if $i}}<br>{{end}}{{$ip}}{{end}}</td>
+            <td><span class="badge {{if eq .Status "OK"}}green{{else}}slate{{end}}">{{default .Status "UNKNOWN"}}</span></td>
+            <td>
+              <form method="post" action="/tools/zerotier/leave">
+                {{template "csrf" $}}<input type="hidden" name="network_id" value="{{.ID}}">
+                <button class="btn danger" type="submit">Leave</button>
+              </form>
+            </td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}<div class="empty">This host has not joined a ZeroTier network.</div>{{end}}
+  </section>
+
+  <div class="form-grid" style="margin-top:16px">
+    <section class="card">
+      <h2>ZeroTier installation</h2>
+      <p class="hint">Official ZeroTier package for this panel host. The button is shown only when ZeroTier is not installed.</p>
+      {{if .ZeroTier.Installed}}
+        <div class="alert ok"><strong>Already installed.</strong> The local service is ready for network management.</div>
+      {{else if not .ZeroTier.SupportedOS}}
+        <button class="btn primary" type="button" disabled>Install unavailable on this OS</button>
+      {{else if not .ZeroTier.HelperReady}}
+        <button class="btn primary" type="button" disabled>Installer helper not provisioned</button>
+        <small>Rerun <span class="mono">sudo ./install.sh</span> to provision the one-click installer.</small>
+      {{else}}
+        <form method="post" action="/tools/zerotier/install">
+          {{template "csrf" .}}<button class="btn primary" type="submit">Install ZeroTier</button>
+        </form>
+      {{end}}
+    </section>
+
+    <section class="card">
+      <h2>Join ZeroTier network</h2>
+      <p class="hint">Add a 16-character network ID to link this host to a virtual network.</p>
+      <form method="post" action="/tools/zerotier/join">
+        {{template "csrf" .}}
+        <div class="field">
+          <label for="zt-network">Network ID</label>
+          <input id="zt-network" name="network_id" placeholder="805c2e21c0000001" pattern="[A-Fa-f0-9]{16}" minlength="16" maxlength="16" required>
+        </div>
+        <div class="btn-row" style="margin-top:12px"><button class="btn primary" type="submit"{{if not .ZeroTier.Installed}} disabled{{end}}>Join network</button></div>
+      </form>
+    </section>
+  </div>
+</main>
+{{template "footer" .}}
+</body>
+</html>
