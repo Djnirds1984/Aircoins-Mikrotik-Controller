@@ -116,9 +116,11 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /network", h.NetworkOverview)
 	mux.HandleFunc("GET /network/{id}", h.NetworkDetail)
 
-	// Hotspot servers (/ip/hotspot).
+	// Hotspot server CRUD (/ip/hotspot).
+	mux.HandleFunc("POST /network/{id}/hotspot/install", h.HotspotInstall)
 	mux.HandleFunc("POST /network/{id}/servers", h.HotspotServerCreate)
 	mux.HandleFunc("POST /network/{id}/servers/{sid}", h.HotspotServerUpdate)
+
 	mux.HandleFunc("POST /network/{id}/servers/{sid}/toggle", h.HotspotServerToggle)
 	mux.HandleFunc("POST /network/{id}/servers/{sid}/delete", h.HotspotServerDelete)
 

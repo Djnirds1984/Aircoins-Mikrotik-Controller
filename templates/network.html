@@ -83,7 +83,52 @@
   <p class="hint muted">{{.Tab.Hint}}</p>
 
 {{if eq .Tab "servers"}}
+  {{$install := .InstallerForm}}
   <section class="card">
+    <h2>Hotspot installer</h2>
+    <p class="hint">Runs the MikroTik <span class="mono">/ip hotspot setup</span> flow: address, pool, DHCP, NAT, DNS, server profile, hotspot server and local administrator. Existing named objects are reused.</p>
+    {{if .InstallerSteps}}
+      <div class="alert {{if .InstallerError}}err{{else}}ok{{end}}">
+        {{if .InstallerError}}<strong>Installation stopped.</strong> RouterOS reported: {{.InstallerError}}{{else}}<strong>Hotspot installation completed.</strong> The commands below were accepted by RouterOS.{{end}}
+      </div>
+      <ul class="notice-list">{{range .InstallerSteps}}<li>{{.}}</li>{{end}}</ul>
+    {{end}}
+    <details class="editor"{{if or $install.Errors .InstallerSteps .InstallerError}} open{{end}}>
+      <summary>{{if .InstallerSteps}}Hotspot installer result{{else}}Run Hotspot installer{{end}}</summary>
+      <form method="post" action="/network/{{$.Router.ID}}/hotspot/install">
+        {{template "csrf" $}}
+        <h3>Network</h3>
+        <div class="form-grid">
+          <div class="field">
+            <label for="install-interface">Hotspot interface</label>
+            <input id="install-interface" name="interface" value="{{$install.Interface}}" placeholder="bridge-hotspot" required>
+            {{with $install.Errors.interface}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field"><label for="install-address">Gateway address</label><input id="install-address" name="address" value="{{$install.Address}}" placeholder="10.5.50.1/24" required>{{with $install.Errors.address}}<span class="error">{{.}}</span>{{end}}</div>
+          <div class="field"><label for="install-pool-range">Address pool range</label><input id="install-pool-range" name="address_pool" value="{{$install.AddressPool}}" placeholder="10.5.50.2-10.5.50.254" required>{{with $install.Errors.address_pool}}<span class="error">{{.}}</span>{{end}}</div>
+          <div class="field"><label for="install-pool-name">Pool name</label><input id="install-pool-name" name="pool_name" value="{{$install.PoolName}}" required>{{with $install.Errors.pool_name}}<span class="error">{{.}}</span>{{end}}</div>
+          <div class="field checkbox"><label><input type="checkbox" name="masquerade" value="1"{{if $install.Masquerade}} checked{{end}}> Add source NAT masquerade</label></div>
+          <div class="field"><label for="install-dns">Router DNS servers</label><input id="install-dns" name="dns_servers" value="{{$install.DNSServers}}" placeholder="1.1.1.1,8.8.8.8">{{with $install.Errors.dns_servers}}<span class="error">{{.}}</span>{{end}}</div>
+        </div>
+        <h3>Hotspot</h3>
+        <div class="form-grid">
+          <div class="field"><label for="install-server-name">Server name</label><input id="install-server-name" name="server_name" value="{{$install.ServerName}}" required>{{with $install.Errors.server_name}}<span class="error">{{.}}</span>{{end}}</div>
+          <div class="field"><label for="install-profile-name">Server profile</label><input id="install-profile-name" name="profile_name" value="{{$install.ProfileName}}" required>{{with $install.Errors.profile_name}}<span class="error">{{.}}</span>{{end}}</div>
+          <div class="field"><label for="install-dns-name">Hotspot DNS name</label><input id="install-dns-name" name="dns_name" value="{{$install.DNSName}}" placeholder="hotspot.local">{{with $install.Errors.dns_name}}<span class="error">{{.}}</span>{{end}}</div>
+          <div class="field"><label for="install-smtp">SMTP server</label><input id="install-smtp" name="smtp_server" value="{{$install.SMTPServer}}" placeholder="0.0.0.0">{{with $install.Errors.smtp_server}}<span class="error">{{.}}</span>{{end}}</div>
+          <div class="field"><label for="install-wall">Walled-garden host</label><input id="install-wall" name="walled_garden_host" value="{{$install.WalledGardenHost}}" placeholder="optional"><small>Optional host allowed before login.</small>{{with $install.Errors.walled_garden_host}}<span class="error">{{.}}</span>{{end}}</div>
+        </div>
+        <h3>Local administrator</h3>
+        <div class="form-grid">
+          <div class="field"><label for="install-admin-user">Username</label><input id="install-admin-user" name="admin_user" value="{{$install.AdminUser}}" required>{{with $install.Errors.admin_user}}<span class="error">{{.}}</span>{{end}}</div>
+          <div class="field"><label for="install-admin-password">Password</label><input id="install-admin-password" name="admin_password" type="password" autocomplete="new-password" required><small>Used only when the account does not exist.</small>{{with $install.Errors.admin_password}}<span class="error">{{.}}</span>{{end}}</div>
+        </div>
+        <div class="actions"><button class="btn primary" type="submit">Install Hotspot</button></div>
+      </form>
+    </details>
+  </section>
+
+  <section class="card" style="margin-top:16px">
     <h2>Hotspot servers <span class="badge slate">{{len .Servers}}</span></h2>
     <p class="hint">/ip/hotspot — every server binds one or more interfaces and decides how the clients on them sign in.</p>
     {{if .Servers}}

@@ -161,6 +161,13 @@ type networkPage struct {
 	WalledGardenActions   []string
 	WalledGardenIPActions []string
 
+	// Hotspot installer mirrors /ip/hotspot setup. Steps and error retain the
+	// partial result so an operator can see exactly where a device-side failure
+	// stopped and safely rerun the named, idempotent steps.
+	InstallerForm  *hotspotInstallerForm
+	InstallerSteps []string
+	InstallerError string
+
 	ServerForm         *hotspotServerForm
 	ServerProfileForm  *hotspotServerProfileForm
 	UserProfileForm    *hotspotUserProfileForm
@@ -178,6 +185,8 @@ func (h *Handler) newNetworkPage(tab networkTab) *networkPage {
 		Tab:                tab,
 		Tabs:               networkTabs,
 		Warnings:           []string{},
+		InstallerForm:      newHotspotInstallerForm(),
+		InstallerSteps:     []string{},
 		ServerForm:         newHotspotServerForm(),
 		ServerProfileForm:  newHotspotServerProfileForm(),
 		UserProfileForm:    newHotspotUserProfileForm(),
