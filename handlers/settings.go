@@ -107,13 +107,10 @@ func (h *Handler) SettingsCredentials(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Changing the credentials must kill every other session: a cookie stolen
-	// before the change would otherwise survive it. This one is revoked too,
-	// so the operator is returned to the login form and signs in again with
-	// the new password - proof that the change took effect.
-	if err := h.db.AdminUsers().DeleteUserSessions(r.Context(), user.ID); err != nil {
-		h.log.Error("cannot revoke sessions after credential change", "error", err)
-	}
+	// SetCredentials already revokes every session of this account, so a
+	// cookie stolen before the change cannot outlive it. Clear this browser's
+	// copy too and return the operator to the login form: signing in again is
+	// the proof that the new password took effect.
 	h.clearAdminCookie(w)
 	h.log.Info("admin credentials changed", "remote", clientIP(r), "account", newName)
 

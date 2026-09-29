@@ -198,6 +198,9 @@ func scanAdminUser(row interface{ Scan(...any) error }) (AdminUser, error) {
 
 // SetCredentials replaces the operator name and/or password. An empty field
 // keeps the current value, so the form can change one at a time.
+//
+// When the password changes, every session of the account is revoked: a
+// cookie captured before the change must not outlive it.
 func (s *AdminUserStore) SetCredentials(ctx context.Context, id int64, username, password string) error {
 	current, err := s.getByID(ctx, id)
 	if err != nil {
@@ -227,13 +230,16 @@ func (s *AdminUserStore) SetCredentials(ctx context.Context, id int64, username,
 		return err
 	}
 	at := now()
-	_, err = s.db.sql.ExecContext(ctx, `
+	if _, err := s.db.sql.ExecContext(ctx, `
         UPDATE admin_users
            SET username = ?, password_hash = ?, salt = ?, iterations = ?,
                updated_at = ?, password_changed_at = ?
          WHERE id = ?`,
-		username, hash, salt, pbkdf2Iterations, stamp(at), stamp(at), id)
-	return wrapDBError("update admin credentials", err)
+		username, hash, salt, pbkdf2Iterations, stamp(at), stamp(at), id); err != nil {
+		return wrapDBError("update admin credentials", err)
+	}
+	// A changed password invalidates every existing session.
+	return s.DeleteUserSessions(ctx, id)
 }
 
 // renameTaken reports a friendly error when the new name belongs to another
@@ -249,6 +255,39 @@ func (s *AdminUserStore) renameTaken(ctx context.Context, username string, id in
 		return fmt.Errorf("the operator name %q is already taken", username)
 	}
 	return nil
+}
+
+// SetPassword replaces the password of an existing account and leaves its
+// operator name alone. Every session of that account is revoked, because a
+// cookie captured before a reset must not outlive it.
+//
+// It backs `aircoins-controller passwd`, the recovery path for an operator
+// who cannot sign in: it must work on an account that already exists, where
+// Create would refuse a duplicate name.
+func (s *AdminUserStore) SetPassword(ctx context.Context, id int64, password string) error {
+	if err := ValidateAdminPassword(password); err != nil {
+		return err
+	}
+	hash, salt, err := hashPassword(password, pbkdf2Iterations)
+	if err != nil {
+		return err
+	}
+	at := now()
+	res, err := s.db.sql.ExecContext(ctx, `
+        UPDATE admin_users
+           SET password_hash = ?, salt = ?, iterations = ?,
+               updated_at = ?, password_changed_at = ?
+         WHERE id = ?`,
+		hash, salt, pbkdf2Iterations, stamp(at), stamp(at), id)
+	if err != nil {
+		return wrapDBError("update admin password", err)
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+		return ErrNotFound
+	}
+	// Revoke here rather than leaving it to the caller: every path that
+	// changes a password must invalidate the sessions it invalidates.
+	return s.DeleteUserSessions(ctx, id)
 }
 
 // VerifyPassword reports whether password matches the stored hash for user.

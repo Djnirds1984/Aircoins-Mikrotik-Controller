@@ -27,7 +27,19 @@ controller creates one operator account:
 
 Seeding only happens while no account exists, so restarting the service never
 resets a password you changed. After the first boot, manage credentials in the
-panel under **Settings**.
+panel under **Settings**, or from the shell:
+
+```bash
+systemctl stop aircoins
+aircoins-controller passwd              # generates a strong one, prints it once
+systemctl start aircoins
+```
+
+`passwd` also takes an explicit password, or `--user <name>` to change the
+operator name, and revokes every existing session. Run
+`aircoins-controller passwd --help` for the details. Use the bare form (or
+`ADMIN_PASSWORD=... aircoins-controller passwd`) rather than passing the
+password as an argument, which is briefly visible in `ps`.
 
 These stay reachable without signing in, because paying guests need them:
 `/` (the captive portal), `/portal/login`, `/portal/status`, `/healthz`.

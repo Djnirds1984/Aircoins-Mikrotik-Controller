@@ -40,10 +40,175 @@ func main() {
 		fmt.Println(version)
 		return
 	}
+	// passwd is the recovery path for an operator locked out of the panel. It
+	// must work while the service is stopped, so it runs before the server and
+	// before the account bootstrap (which would otherwise be a no-op anyway).
+	if len(os.Args) > 1 && os.Args[1] == "passwd" {
+		if err := runPasswd(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "aircoins-controller passwd:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "aircoins-controller:", err)
 		os.Exit(1)
 	}
+}
+
+// passwdUsage explains the subcommand, including the flags that keep the
+// password off the process list.
+const passwdUsage = `Set or reset the panel operator password.
+
+Usage:
+  aircoins-controller passwd                 generate a strong password
+  aircoins-controller passwd <password>      set an explicit password
+
+Options:
+  --user <name>   also change the operator name (default: keep current)
+  --show          print the current operator name and exit
+
+Reading the password:
+  * With no argument a strong password is generated and printed once.
+  * Pass it as an argument only for scripting; it is visible in
+    "ps" output for a moment. Prefer the generated form by hand.
+  * ADMIN_PASSWORD in the environment is used when no argument is given,
+    which keeps it out of the shell history and the process list.
+
+Stop the service before running this, then start it again:
+  systemctl stop aircoins && aircoins-controller passwd && systemctl start aircoins
+`
+
+// runPasswd implements the passwd subcommand.
+func runPasswd(args []string) error {
+	var (
+		showUser    bool
+		newUsername string
+		password    string
+		positional  []string
+	)
+	for i := 0; i < len(args); i++ {
+		switch arg := args[i]; arg {
+		case "-h", "--help", "help":
+			fmt.Print(passwdUsage)
+			return nil
+		case "--user", "-u":
+			if i+1 >= len(args) {
+				return errors.New("--user needs a value")
+			}
+			i++
+			newUsername = args[i]
+		case "--show":
+			showUser = true
+		default:
+			if len(arg) > 1 && arg[0] == '-' {
+				return fmt.Errorf("unknown option %q (try --help)", arg)
+			}
+			positional = append(positional, arg)
+		}
+	}
+	if len(positional) > 1 {
+		return errors.New("expected at most one password argument (try --help)")
+	}
+	if len(positional) == 1 {
+		password = positional[0]
+	}
+
+	cfg, _, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db, err := database.Open(ctx, cfg.DB)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	store := db.AdminUsers()
+	user, err := store.Get(ctx)
+	if err != nil {
+		if !errors.Is(err, database.ErrNoAdminUser) {
+			return err
+		}
+		// No account yet: create one so the operator is never left without a
+		// way in.
+		username := newUsername
+		if username == "" {
+			username = cfg.Handler.AdminUser
+		}
+		if password == "" {
+			password = firstNonEmpty(os.Getenv("ADMIN_PASSWORD"), mustGeneratePassword())
+		}
+		if err := store.Create(ctx, username, password); err != nil {
+			return err
+		}
+		fmt.Printf("Created operator %q.\n", database.NormalizeAdminUsername(username))
+		fmt.Printf("Password: %s\n", password)
+		fmt.Println("Sign in at the panel, then change it under Settings.")
+		return nil
+	}
+
+	if showUser {
+		fmt.Println(user.Username)
+		return nil
+	}
+
+	// With no password given, prefer the environment (keeps it out of the
+	// process list) and fall back to generating one.
+	generated := false
+	if password == "" {
+		if fromEnv := strings.TrimSpace(os.Getenv("ADMIN_PASSWORD")); fromEnv != "" {
+			password = fromEnv
+		} else {
+			password = mustGeneratePassword()
+			generated = true
+		}
+	}
+
+	if newUsername == "" {
+		if err := store.SetPassword(ctx, user.ID, password); err != nil {
+			return err
+		}
+	} else {
+		if err := store.SetCredentials(ctx, user.ID, newUsername, password); err != nil {
+			return err
+		}
+	}
+	// Both store calls revoke every session of the account, so a cookie
+	// stolen before this reset cannot outlive it.
+	if newUsername == "" {
+		fmt.Printf("Password updated for %q.\n", user.Username)
+	} else {
+		fmt.Printf("Operator is now %q.\n", database.NormalizeAdminUsername(newUsername))
+	}
+	if generated {
+		fmt.Printf("Password: %s\n", password)
+	}
+	fmt.Println("All existing sessions were signed out.")
+	return nil
+}
+
+func mustGeneratePassword() string {
+	password, err := randomPassword()
+	if err != nil {
+		// crypto/rand failing is fatal for a credential; there is no safe
+		// weaker fallback, so stop rather than invent one.
+		fmt.Fprintln(os.Stderr, "aircoins-controller: cannot generate a password:", err)
+		os.Exit(1)
+	}
+	return password
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func run() error {
