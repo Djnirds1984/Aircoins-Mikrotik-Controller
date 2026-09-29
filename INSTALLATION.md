@@ -137,7 +137,9 @@ Copy the systemd unit from `install.sh` section 5, adjusting
   `main` and restart the service.
 - `Service unhealthy`: `journalctl -u aircoins -e`; check port clash
   (`ss -tlnp` — an existing web server often owns port 80) and `DB_PATH`
-  writability.
+  writability. The `aircoins controller listening` line shows the address the
+  service bound; if it disagrees with the port the installer tested, the env
+  file's `ADDR` is overriding `--port` (section F).
 - `bind: permission denied` while listening on port 80: the unit lost
   `AmbientCapabilities=CAP_NET_BIND_SERVICE`, or the binary was started by hand
   without the capability — section F has the fixes.
@@ -167,6 +169,31 @@ A fresh install picks the port with `--port 8080` (or `--addr host:port`);
 `install.sh` opens that port in the firewall. Every link the panel emits is
 relative (`/portal/login?...`, the flash redirects) and it never prints its own
 host or port, so any port and a reverse proxy both work unchanged.
+
+### Upgrading an older install
+
+`install.sh` never overwrites hand-edited settings in
+`/etc/aircoins/aircoins.env`, with one deliberate exception: the `ADDR` line
+older releases shipped (`0.0.0.0:8080`). That is a product default, not a
+local choice, so a re-run rewrites it to the port you selected and leaves a
+timestamped copy at `/etc/aircoins/aircoins.env.bak-<date>`:
+
+```text
+[+] Migrated ADDR 0.0.0.0:8080 -> 0.0.0.0:80 in /etc/aircoins/aircoins.env (backup: ...)
+```
+
+Any other value is yours, and it is kept — the installer then reports the
+address in force and opens/tests *that* port instead:
+
+```text
+[!] /etc/aircoins/aircoins.env sets ADDR=0.0.0.0:9090 (not 0.0.0.0:80); using that address.
+```
+
+If a health check fails after an upgrade, compare the two lines: the
+`aircoins controller listening` log line prints the address the service bound,
+and the installer probes the address it expects. A mismatch means the env file
+overrides `--port`, so move the `ADDR` line (or pass the same value to
+`--port`) and re-run.
 
 ### Why it can bind a privileged port as a normal user
 

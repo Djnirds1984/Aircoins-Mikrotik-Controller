@@ -38,6 +38,25 @@ log()  { printf '\033[1;32m[+] %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m[!] %s\033[0m\n' "$*" >&2; }
 die()  { printf '\033[1;31m[x] %s\033[0m\n' "$*" >&2; exit 1; }
 
+# The ADDR previous releases wrote into the env file. It is a shipped default,
+# not a local choice, so an upgrade may move it - see the env file section.
+LEGACY_DEFAULT_ADDR="0.0.0.0:8080"
+
+# addr_from_env FILE - print the ADDR the service will actually use, or fail
+# when the file sets none. Quotes and trailing blanks are tolerated, and the
+# last ADDR line wins because systemd applies EnvironmentFile lines in order.
+addr_from_env() {
+  local value
+  value="$(sed -n 's/^[[:space:]]*ADDR[[:space:]]*=[[:space:]]*//p' "$1" 2>/dev/null | tail -1)"
+  value="${value%"${value##*[![:space:]]}"}"
+  value="${value%\"}"
+  value="${value#\"}"
+  value="${value%\'}"
+  value="${value#\'}"
+  [[ -n "$value" ]] || return 1
+  printf '%s' "$value"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --port)          PORT="${2:?}"; shift 2 ;;
@@ -317,9 +336,34 @@ API_TIMEOUT=12s
 EOF
   chmod 640 "$ENV_FILE"
 else
-  log "Keeping existing $ENV_FILE"
+  # An existing file wins: hand-edited settings are the operator's business.
+  # The one exception is the ADDR older releases shipped here, which is a
+  # product default rather than a local choice - it is migrated so an upgrade
+  # lands on the port this run selected instead of silently keeping the old one.
+  PREV_ADDR="$(addr_from_env "$ENV_FILE" || true)"
+  if [[ "$PREV_ADDR" == "$LEGACY_DEFAULT_ADDR" && "$ADDR" != "$PREV_ADDR" ]]; then
+    BACKUP="${ENV_FILE}.bak-$(date +%Y%m%d%H%M%S)"
+    cp -a "$ENV_FILE" "$BACKUP"
+    sed -i "s|^[[:space:]]*ADDR[[:space:]]*=.*|ADDR=$ADDR|" "$ENV_FILE"
+    log "Migrated ADDR $PREV_ADDR -> $ADDR in $ENV_FILE (backup: $BACKUP)"
+  else
+    log "Keeping existing $ENV_FILE${PREV_ADDR:+ (ADDR=$PREV_ADDR)}"
+  fi
 fi
 chown root:"$SVC_USER" "$ENV_FILE" 2>/dev/null || true
+
+# The service takes ADDR from the env file, so the firewall, the smoke-test and
+# the printed URLs must follow the effective value - never the requested one.
+EFFECTIVE_ADDR="$(addr_from_env "$ENV_FILE" || true)"
+[[ -n "$EFFECTIVE_ADDR" ]] || EFFECTIVE_ADDR="$ADDR"
+if [[ "$EFFECTIVE_ADDR" != *:* ]]; then
+  # A bare "8080" means "all interfaces on that port"; spell it out so the port
+  # split and the URLs below stay correct.
+  EFFECTIVE_ADDR="0.0.0.0:$EFFECTIVE_ADDR"
+fi
+if [[ "$EFFECTIVE_ADDR" != "$ADDR" ]]; then
+  warn "$ENV_FILE sets ADDR=$EFFECTIVE_ADDR (not $ADDR); using that address."
+fi
 
 TOOLS_HELPER="/usr/local/sbin/aircoins-install-zerotier"
 log "Installing the restricted host-tools helper ..."
@@ -368,7 +412,9 @@ WantedBy=multi-user.target
 EOF
 
 # --- 6. Firewall ---------------------------------------------------------
-LISTEN_PORT="${ADDR##*:}"
+LISTEN_PORT="${EFFECTIVE_ADDR##*:}"
+[[ "$LISTEN_PORT" =~ ^[0-9]+$ ]] && (( LISTEN_PORT >= 1 && LISTEN_PORT <= 65535 )) \
+  || die "ADDR=$EFFECTIVE_ADDR in $ENV_FILE carries no valid port"
 if (( CONFIGURE_FIREWALL )); then
   if command -v ufw >/dev/null 2>&1; then
     if ufw status 2>/dev/null | grep -qi "status: active"; then
@@ -415,7 +461,7 @@ fi
 INSTALLED_VERSION="$($INSTALL_DIR/$APP_NAME --version 2>/dev/null || true)"
 [[ -n "$INSTALLED_VERSION" ]] || INSTALLED_VERSION="version unavailable"
 
-HOST_PART="${ADDR%%:*}"
+HOST_PART="${EFFECTIVE_ADDR%%:*}"
 if [[ "$HOST_PART" == "0.0.0.0" || -z "$HOST_PART" ]]; then HOST_PART="127.0.0.1"; fi
 # Browsers already default to port 80, so it is left out of the printed URLs.
 URL_HOST="$HOST_PART"
@@ -423,7 +469,7 @@ URL_HOST="$HOST_PART"
 if curl -fsS --max-time 10 "http://${URL_HOST}/healthz" | grep -q ok; then
   log "Health check OK: http://${URL_HOST}/healthz"
 else
-  warn "Health check failed; recent logs:"
+  warn "Health check failed on http://${URL_HOST}/healthz; recent logs:"
   journalctl -u "$SERVICE_NAME" --no-pager -n 30 2>/dev/null || true
   die "Service unhealthy. Inspect: journalctl -u $SERVICE_NAME -e"
 fi
