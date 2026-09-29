@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · {{.PortalName}}</title>
+<meta name="robots" content="noindex, nofollow">
+{{template "styles" .}}
+</head>
+<body class="portal">
+<main class="portal-wrap">
+  <div class="portal-card">
+    <div class="brand"><span class="mark">A</span><span>{{.PortalName}}</span></div>
+    <h1>Sign in</h1>
+    <p class="sub">Operator access to the controller panel.</p>
+
+    {{if .FormError}}<div class="alert err" role="alert">{{.FormError}}</div>{{end}}
+    {{template "flash" .}}
+
+    <form method="post" action="{{.AdminPath}}/login">
+      {{template "csrf" .}}
+      <input type="hidden" name="next" value="{{.Next}}">
+      <div class="field">
+        <label for="username">Operator name</label>
+        <input id="username" name="username" autocomplete="username" autocapitalize="none"
+          spellcheck="false" required autofocus value="{{.Username}}">
+      </div>
+      <div class="field" style="margin-top:12px">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <div class="btn-row" style="margin-top:16px">
+        <button class="btn primary" type="submit">Sign in</button>
+        <a class="btn" href="/">Back to Wi-Fi page</a>
+      </div>
+    </form>
+
+    <p class="hint" style="margin-top:16px">
+      Repeated wrong passwords lock this account for a while, and the delay
+      grows with every failure.
+    </p>
+  </div>
+  <p class="portal-foot">{{.PortalName}} · v{{.Version}}</p>
+</main>
+</body>
+</html>

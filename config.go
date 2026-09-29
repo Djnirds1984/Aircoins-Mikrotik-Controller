@@ -37,8 +37,24 @@ func loadConfig() (appConfig, string, error) {
 	// restores the previous layout where / is the operator dashboard.
 	cfg.Handler.AdminPath = envOr("ADMIN_PATH", "/admin")
 	cfg.Handler.DashboardAtRoot = envBool("DASHBOARD_AT_ROOT")
+	// Panel credentials are only used on the very first boot, when the
+	// account table is still empty. They never overwrite an existing account,
+	// so changing them later has no effect - use /admin/settings for that.
+	cfg.Handler.AdminUser = envOr("ADMIN_USER", "admin")
+	cfg.Handler.AdminPassword = os.Getenv("ADMIN_PASSWORD")
 	cfg.Handler.DefaultRedirect = strings.TrimSpace(os.Getenv("DEFAULT_REDIRECT"))
 	cfg.Handler.SecureCookies = envBool("SECURE_COOKIES")
+
+	// How long a panel sign-in survives. A non-positive or unparsable value
+	// is ignored rather than fatal: a typo here should not stop the hotspot
+	// controller from booting.
+	if raw := strings.TrimSpace(os.Getenv("ADMIN_SESSION_TTL")); raw != "" {
+		if ttl, err := time.ParseDuration(raw); err == nil && ttl > 0 {
+			cfg.Handler.AdminSessionTTL = ttl
+		} else {
+			fmt.Fprintf(os.Stderr, "aircoins-controller: ignoring invalid ADMIN_SESSION_TTL %q (want e.g. 12h)\n", raw)
+		}
+	}
 
 	// The panel ships on port 80 so it is reachable as http://<board-ip>/
 	// without a port suffix; install.sh grants the service user

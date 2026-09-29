@@ -49,6 +49,14 @@ type Config struct {
 	// SecureCookies sets the Secure flag on admin cookies. Enable it behind
 	// HTTPS.
 	SecureCookies bool
+	// AdminUser is the operator name seeded on first boot. An existing
+	// account is never overwritten by it.
+	AdminUser string
+	// AdminPassword seeds the operator password on first boot. When it is
+	// empty a random one is generated and logged once.
+	AdminPassword string
+	// AdminSessionTTL is how long a panel login stays valid.
+	AdminSessionTTL time.Duration
 	// PortalLoginBurst is how many captive portal logins one client IP may
 	// attempt inside PortalLoginWindow before being throttled.
 	PortalLoginBurst int
@@ -92,6 +100,9 @@ func (c Config) withDefaults() Config {
 	if c.Version == "" {
 		c.Version = "dev"
 	}
+	if c.AdminSessionTTL <= 0 {
+		c.AdminSessionTTL = 12 * time.Hour
+	}
 	return c
 }
 
@@ -102,18 +113,21 @@ type Handler struct {
 	cfg     Config
 	log     *slog.Logger
 	limiter *ipLimiter
-	traffic trafficStore
+	// loginGuard throttles password guesses against the panel sign-in form.
+	loginGuard *loginGuard
+	traffic    trafficStore
 }
 
 // New builds a Handler. The template set must already be parsed.
 func New(db *database.DB, tpl *template.Template, cfg Config) *Handler {
 	cfg = cfg.withDefaults()
 	return &Handler{
-		db:      db,
-		tpl:     tpl,
-		cfg:     cfg,
-		log:     cfg.Logger,
-		limiter: newIPLimiter(cfg.PortalLoginBurst, cfg.PortalLoginWindow),
+		db:         db,
+		tpl:        tpl,
+		cfg:        cfg,
+		log:        cfg.Logger,
+		limiter:    newIPLimiter(cfg.PortalLoginBurst, cfg.PortalLoginWindow),
+		loginGuard: defaultLoginGuard(),
 	}
 }
 
@@ -144,9 +158,10 @@ func (h *Handler) Routes() http.Handler {
 		mux.HandleFunc("GET /{$}", h.PortalIndex)
 	}
 
-	// The panel under its prefix. "/admin" (no slash) has to redirect by hand
-	// because the subtree pattern only matches "/admin/".
-	mux.Handle(h.cfg.AdminPath+"/", http.StripPrefix(h.cfg.AdminPath, admin))
+	// The panel under its prefix, behind the session guard. "/admin" (no
+	// slash) has to redirect by hand because the subtree pattern only
+	// matches "/admin/".
+	mux.Handle(h.cfg.AdminPath+"/", h.requireAuth(http.StripPrefix(h.cfg.AdminPath, admin)))
 	mux.HandleFunc("GET "+h.cfg.AdminPath, func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, h.cfg.AdminPath+"/", http.StatusMovedPermanently)
 	})
@@ -154,8 +169,8 @@ func (h *Handler) Routes() http.Handler {
 	// Health stays a flat, prefix-free probe for systemd and load balancers.
 	mux.HandleFunc("GET /healthz", h.Health)
 
-	// Everything else is the admin route table, unmounted.
-	mux.Handle("/", admin)
+	// The same route table at the root, also guarded.
+	mux.Handle("/", h.requireAuth(admin))
 
 	return h.recoverer(h.logRequests(h.securityHeaders(h.csrfGuard(mux))))
 }
@@ -241,6 +256,17 @@ func (h *Handler) adminRoutes() *http.ServeMux {
 	mux.HandleFunc("POST /vouchers/{id}/status", h.VoucherSetStatus)
 	mux.HandleFunc("POST /vouchers/{id}/push", h.VoucherPush)
 	mux.HandleFunc("POST /vouchers/{id}/validate", h.VoucherValidate)
+
+	// Panel authentication. These are the only routes reachable without a
+	// session (see isPublicPath).
+	mux.HandleFunc("GET /login", h.AdminLogin)
+	mux.HandleFunc("POST /login", h.AdminLoginSubmit)
+	mux.HandleFunc("GET /logout", h.AdminLogout)
+	mux.HandleFunc("POST /logout", h.AdminLogout)
+
+	// Panel settings (change the operator credentials).
+	mux.HandleFunc("GET /settings", h.Settings)
+	mux.HandleFunc("POST /settings/credentials", h.SettingsCredentials)
 
 	// Captive portal. The login form stays on its own path: the landing page
 	// at "/" is a separate handler so a direct visit is not answered with a

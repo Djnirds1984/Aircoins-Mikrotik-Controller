@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
@@ -17,8 +18,18 @@ import (
 
 // newCaptiveE2E starts the whole front end against an empty database and
 // returns its base URL, so a test can request the two front doors exactly the
-// way a browser reaches them.
+// way a browser reaches them. The returned client is signed in, since the
+// panel is behind a session guard.
 func newCaptiveE2E(t *testing.T, cfg Config) (string, *database.DB) {
+	t.Helper()
+	base, db := newUnauthE2E(t, cfg)
+	return base, db
+}
+
+// newUnauthE2E starts the front end and returns a plain, not-yet-signed-in
+// browser. Tests about the login form itself use it; everything else should
+// use newCaptiveE2E so it exercises the panel as a signed-in operator does.
+func newUnauthE2E(t *testing.T, cfg Config) (string, *database.DB) {
 	t.Helper()
 	ctx := context.Background()
 	db, err := database.Open(ctx, database.Config{
@@ -30,6 +41,12 @@ func newCaptiveE2E(t *testing.T, cfg Config) (string, *database.DB) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	// Every test needs an operator account, otherwise the panel is (correctly)
+	// unreachable and the test would only prove the login form renders.
+	if _, err := db.AdminUsers().EnsureAdminUser(ctx, testAdminUser, testAdminPass); err != nil {
+		t.Fatalf("create admin user: %v", err)
+	}
+
 	tpl, err := template.New("").Funcs(TemplateFuncs()).ParseGlob("../" + TemplatePattern)
 	if err != nil {
 		t.Fatalf("parse templates: %v", err)
@@ -39,6 +56,89 @@ func newCaptiveE2E(t *testing.T, cfg Config) (string, *database.DB) {
 	return web.URL, db
 }
 
+// Test credentials shared by the end-to-end tests. The password clears the
+// 10 character minimum enforced by the real store.
+const (
+	testAdminUser = "tester"
+	testAdminPass = "correct-horse-battery"
+)
+
+// signInAt walks the real login form so the session cookie is issued exactly
+// the way it is in production, CSRF token and all.
+//
+// The assertion is on the final URL, not the status: the client follows the
+// 303 to the dashboard, so a successful sign-in reports the dashboard's 200.
+func signInAt(t *testing.T, base, adminPath string, client *http.Client) {
+	t.Helper()
+	page := getBody(t, client, base+adminPath+"/login")
+	resp, err := client.PostForm(base+adminPath+"/login", url.Values{
+		"csrf_token": {csrfOf(t, page)},
+		"username":   {testAdminUser},
+		"password":   {testAdminPass},
+		"next":       {adminPath + "/"},
+	})
+	if err != nil {
+		t.Fatalf("sign in: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("sign in ended on status %d, want the dashboard (200)", resp.StatusCode)
+	}
+	if !strings.HasSuffix(resp.Request.URL.Path, adminPath+"/") {
+		t.Fatalf("sign in landed on %q, want the panel dashboard", resp.Request.URL.Path)
+	}
+}
+
+// authedClientFor returns an http.Client that already carries a valid panel
+// session, for tests that call the API with plain http.Get/http.Post and do
+// not want to walk the login form.
+//
+// The session is minted through the real store, so it exercises the same path
+// a browser login does.
+func authedClientFor(t *testing.T, base string, db *database.DB) *http.Client {
+	t.Helper()
+	user, err := db.AdminUsers().Get(context.Background())
+	if err != nil {
+		t.Fatalf("load admin user: %v", err)
+	}
+	token, expires, err := db.AdminUsers().CreateSession(context.Background(), user.ID, "test", time.Hour)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookie jar: %v", err)
+	}
+	baseURL, err := url.Parse(base)
+	if err != nil {
+		t.Fatalf("parse base url: %v", err)
+	}
+	jar.SetCookies(baseURL, []*http.Cookie{{
+		Name: adminSessionCookie, Value: token, Path: "/", Expires: expires,
+	}})
+	return &http.Client{Jar: jar}
+}
+
+// signedInBrowser returns a cookie-carrying client that has already signed in
+// at the default /admin prefix.
+func signedInBrowser(t *testing.T, base string) *http.Client {
+	t.Helper()
+	return signedInBrowserAt(t, base, "/admin")
+}
+
+// signedInBrowserAt signs in against an explicit panel prefix, for the tests
+// that mount the panel somewhere other than /admin.
+func signedInBrowserAt(t *testing.T, base, adminPath string) *http.Client {
+	t.Helper()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookie jar: %v", err)
+	}
+	client := &http.Client{Jar: jar}
+	signInAt(t, base, adminPath, client)
+	return client
+}
+
 // TestRootServesCaptivePortalAndAdminHidesThePanel is the contract this feature
 // exists for: opening the IP address of the controller shows the hotspot
 // landing page, and the operator panel is one path deeper at /admin. If "/" ever
@@ -46,7 +146,7 @@ func newCaptiveE2E(t *testing.T, cfg Config) (string, *database.DB) {
 func TestRootServesCaptivePortalAndAdminHidesThePanel(t *testing.T) {
 	base, _ := newCaptiveE2E(t, Config{})
 
-	root := getBody(t, http.DefaultClient, base+"/")
+	root := getBody(t, signedInBrowser(t, base), base+"/")
 	if !strings.Contains(root, "Free Wi-Fi") {
 		t.Errorf("GET / did not render the captive portal landing page")
 	}
@@ -58,7 +158,8 @@ func TestRootServesCaptivePortalAndAdminHidesThePanel(t *testing.T) {
 		t.Error("the captive portal page rendered the operator navigation")
 	}
 
-	panel := getBody(t, http.DefaultClient, base+"/admin/")
+	browser := signedInBrowser(t, base)
+	panel := getBody(t, browser, base+"/admin/")
 	if !strings.Contains(panel, "Routers</a>") {
 		t.Error("GET /admin/ did not render the operator dashboard")
 	}
@@ -92,9 +193,10 @@ func TestAdminRedirectsWithoutTrailingSlash(t *testing.T) {
 // when a form 404s.
 func TestAdminMountServesTheWholePanel(t *testing.T) {
 	base, _ := newCaptiveE2E(t, Config{})
+	browser := signedInBrowser(t, base)
 
 	for _, path := range []string{"/admin/routers", "/admin/vouchers", "/admin/sessions", "/admin/tools"} {
-		page := getBody(t, http.DefaultClient, base+path)
+		page := getBody(t, browser, base+path)
 		if !strings.Contains(page, `class="topbar"`) {
 			t.Errorf("GET %s did not render a panel page", path)
 		}
@@ -106,7 +208,8 @@ func TestAdminMountServesTheWholePanel(t *testing.T) {
 func TestAdminPathsStayInsideThePanel(t *testing.T) {
 	base, _ := newCaptiveE2E(t, Config{})
 
-	panel := getBody(t, http.DefaultClient, base+"/admin/")
+	browser := signedInBrowser(t, base)
+	panel := getBody(t, browser, base+"/admin/")
 	for _, want := range []string{`href="/admin/routers"`, `href="/admin/vouchers"`, `href="/admin/"`} {
 		if !strings.Contains(panel, want) {
 			t.Errorf("panel navigation is missing %s", want)
@@ -123,7 +226,7 @@ func TestAdminPathsStayInsideThePanel(t *testing.T) {
 func TestLegacyRootAdminRoutesStillResolve(t *testing.T) {
 	base, _ := newCaptiveE2E(t, Config{})
 
-	if page := getBody(t, http.DefaultClient, base+"/routers"); !strings.Contains(page, `class="topbar"`) {
+	if page := getBody(t, signedInBrowser(t, base), base+"/routers"); !strings.Contains(page, `class="topbar"`) {
 		t.Error("GET /routers stopped working after the /admin split")
 	}
 	resp, err := http.Get(base + "/healthz")
@@ -211,7 +314,7 @@ func TestCaptivePortalGreetsAnOnlineClient(t *testing.T) {
 func TestDashboardAtRootRestoresTheLegacyLayout(t *testing.T) {
 	base, _ := newCaptiveE2E(t, Config{DashboardAtRoot: true})
 
-	root := getBody(t, http.DefaultClient, base+"/")
+	root := getBody(t, signedInBrowser(t, base), base+"/")
 	if !strings.Contains(root, "Routers</a>") {
 		t.Error("DASHBOARD_AT_ROOT did not put the dashboard back on /")
 	}
@@ -226,7 +329,7 @@ func TestDashboardAtRootRestoresTheLegacyLayout(t *testing.T) {
 func TestAdminPathIsConfigurable(t *testing.T) {
 	base, _ := newCaptiveE2E(t, Config{AdminPath: "panel/"})
 
-	if body := getBody(t, http.DefaultClient, base+"/panel/"); !strings.Contains(body, "Routers</a>") {
+	if body := getBody(t, signedInBrowserAt(t, base, "/panel"), base+"/panel/"); !strings.Contains(body, "Routers</a>") {
 		t.Error("a trailing slash in ADMIN_PATH broke the panel mount")
 	}
 	if body := getBody(t, http.DefaultClient, base+"/"); !strings.Contains(body, "Free Wi-Fi") {

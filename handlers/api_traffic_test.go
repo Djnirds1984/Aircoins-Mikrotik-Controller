@@ -17,8 +17,10 @@ import (
 )
 
 // apiTestServer wires a Handler to a temporary database and the parsed
-// templates, the way main.go does, and returns its base URL.
-func apiTestServer(t *testing.T) string {
+// templates, the way main.go does. It returns the base URL and a client that
+// already holds a panel session, because the REST API sits behind the auth
+// guard like every other operator endpoint.
+func apiTestServer(t *testing.T) (string, *http.Client) {
 	t.Helper()
 	ctx := context.Background()
 	db, err := database.Open(ctx, database.Config{
@@ -29,6 +31,9 @@ func apiTestServer(t *testing.T) string {
 		t.Fatalf("open database: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
+	if _, err := db.AdminUsers().EnsureAdminUser(ctx, testAdminUser, testAdminPass); err != nil {
+		t.Fatalf("create admin user: %v", err)
+	}
 	tpl, err := template.New("").Funcs(TemplateFuncs()).ParseGlob("../" + TemplatePattern)
 	if err != nil {
 		t.Fatalf("parse templates: %v", err)
@@ -36,7 +41,7 @@ func apiTestServer(t *testing.T) string {
 	h := New(db, tpl, Config{APITimeout: 5 * time.Second})
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)
-	return srv.URL
+	return srv.URL, authedClientFor(t, srv.URL, db)
 }
 
 // apiTrafficPayload mirrors what templates/dashboard.html parses.
@@ -61,13 +66,13 @@ type apiTrafficPayload struct {
 // maps, and the second poll must append to the first sample.
 func TestAPIRouterInterfaceTraffic(t *testing.T) {
 	stub := newRestStub(t)
-	base := apiTestServer(t)
+	base, client := apiTestServer(t)
 	host, port := splitStubURL(t, stub.server.URL)
 
 	body := `{"name":"stub","host":"` + host + `","port":` + strconv.Itoa(port) +
 		`,"username":"aircoins","password":"s3cret","transport":"` + database.TransportREST +
 		`","rest_port":` + strconv.Itoa(port) + `}`
-	resp, err := http.Post(base+"/api/v1/routers", "application/json", strings.NewReader(body))
+	resp, err := client.Post(base+"/api/v1/routers", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("create router: %v", err)
 	}
@@ -85,7 +90,7 @@ func TestAPIRouterInterfaceTraffic(t *testing.T) {
 		t.Helper()
 		url := base + "/api/v1/routers/" + strconv.FormatInt(created.ID, 10) +
 			"/interfaces/*1/traffic"
-		resp, err := http.Get(url)
+		resp, err := client.Get(url)
 		if err != nil {
 			t.Fatalf("traffic poll: %v", err)
 		}
@@ -126,7 +131,7 @@ func TestAPIRouterInterfaceTraffic(t *testing.T) {
 	}
 
 	// An unknown router keeps the standard error contract.
-	resp, err = http.Get(base + "/api/v1/routers/9999/interfaces/*1/traffic")
+	resp, err = client.Get(base + "/api/v1/routers/9999/interfaces/*1/traffic")
 	if err != nil {
 		t.Fatalf("unknown router poll: %v", err)
 	}
@@ -138,12 +143,12 @@ func TestAPIRouterInterfaceTraffic(t *testing.T) {
 
 // registerRESTRouter adds a router that points at a REST stub and returns its
 // database id, so a test can drive the API against a fake device.
-func registerRESTRouter(t *testing.T, base, host string, port int) int64 {
+func registerRESTRouter(t *testing.T, client *http.Client, base, host string, port int) int64 {
 	t.Helper()
 	body := `{"name":"stub","host":"` + host + `","port":` + strconv.Itoa(port) +
 		`,"username":"aircoins","password":"s3cret","transport":"` + database.TransportREST +
 		`","rest_port":` + strconv.Itoa(port) + `}`
-	resp, err := http.Post(base+"/api/v1/routers", "application/json", strings.NewReader(body))
+	resp, err := client.Post(base+"/api/v1/routers", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("create router: %v", err)
 	}
@@ -161,11 +166,11 @@ func registerRESTRouter(t *testing.T, base, host string, port int) int64 {
 
 // pollInterfaceTraffic reads one sample of the graph endpoint and asserts the
 // status the API answered with.
-func pollInterfaceTraffic(t *testing.T, base string, routerID int64, iface string, want int) apiTrafficPayload {
+func pollInterfaceTraffic(t *testing.T, client *http.Client, base string, routerID int64, iface string, want int) apiTrafficPayload {
 	t.Helper()
 	url := base + "/api/v1/routers/" + strconv.FormatInt(routerID, 10) +
 		"/interfaces/" + iface + "/traffic"
-	resp, err := http.Get(url)
+	resp, err := client.Get(url)
 	if err != nil {
 		t.Fatalf("traffic poll %s: %v", url, err)
 	}
@@ -236,12 +241,12 @@ func newStrictRESTStub(t *testing.T, idless bool) *strictRESTStub {
 // with an error the graph cannot draw.
 func TestAPIRouterInterfaceTrafficLookupFallback(t *testing.T) {
 	stub := newStrictRESTStub(t, false)
-	base := apiTestServer(t)
+	base, client := apiTestServer(t)
 	host, port := splitStubURL(t, stub.server.URL)
-	routerID := registerRESTRouter(t, base, host, port)
+	routerID := registerRESTRouter(t, client, base, host, port)
 
 	// The list endpoint must hand the dashboard a usable id to select.
-	resp, err := http.Get(base + "/api/v1/routers/" + strconv.FormatInt(routerID, 10) + "/interfaces")
+	resp, err := client.Get(base + "/api/v1/routers/" + strconv.FormatInt(routerID, 10) + "/interfaces")
 	if err != nil {
 		t.Fatalf("interface list: %v", err)
 	}
@@ -257,14 +262,14 @@ func TestAPIRouterInterfaceTrafficLookupFallback(t *testing.T) {
 	}
 
 	// Poll by id, the way the dropdown does, twice: the window must accumulate.
-	first := pollInterfaceTraffic(t, base, routerID, "*1", http.StatusOK)
+	first := pollInterfaceTraffic(t, client, base, routerID, "*1", http.StatusOK)
 	if first.InterfaceName != "ether1" || len(first.Points) != 1 {
 		t.Fatalf("payload = %+v, want a single ether1 sample", first)
 	}
 	if got := first.Points[0].RxBytes; got != 1024 {
 		t.Errorf("rx_bytes = %d, want 1024: the counters of the resolved row must be used", got)
 	}
-	second := pollInterfaceTraffic(t, base, routerID, "*1", http.StatusOK)
+	second := pollInterfaceTraffic(t, client, base, routerID, "*1", http.StatusOK)
 	if len(second.Points) != 2 {
 		t.Errorf("second poll returned %d points, want 2: the window must accumulate",
 			len(second.Points))
@@ -272,18 +277,18 @@ func TestAPIRouterInterfaceTrafficLookupFallback(t *testing.T) {
 
 	// A dropdown that carried the interface name instead resolves too; the
 	// window is keyed per requested interface, so this starts its own series.
-	byName := pollInterfaceTraffic(t, base, routerID, "ether1", http.StatusOK)
+	byName := pollInterfaceTraffic(t, client, base, routerID, "ether1", http.StatusOK)
 	if byName.InterfaceName != "ether1" || len(byName.Points) != 1 {
 		t.Errorf("payload = %+v, want one ether1 sample for the name lookup", byName)
 	}
 
 	// An interface the device does not have stays a 404, and a placeholder
 	// value is refused before it ever reaches the device.
-	missing := pollInterfaceTraffic(t, base, routerID, "*9", http.StatusNotFound)
+	missing := pollInterfaceTraffic(t, client, base, routerID, "*9", http.StatusNotFound)
 	if missing.InterfaceName != "" || len(missing.Points) != 0 {
 		t.Errorf("missing interface payload = %+v, want nothing", missing)
 	}
-	pollInterfaceTraffic(t, base, routerID, "undefined", http.StatusBadRequest)
+	pollInterfaceTraffic(t, client, base, routerID, "undefined", http.StatusBadRequest)
 }
 
 // TestAPIRouterInterfaceTrafficWithoutIDs covers the other half of the same
@@ -292,11 +297,11 @@ func TestAPIRouterInterfaceTrafficLookupFallback(t *testing.T) {
 // even though the device refuses every ".id" print filter.
 func TestAPIRouterInterfaceTrafficWithoutIDs(t *testing.T) {
 	stub := newStrictRESTStub(t, true)
-	base := apiTestServer(t)
+	base, client := apiTestServer(t)
 	host, port := splitStubURL(t, stub.server.URL)
-	routerID := registerRESTRouter(t, base, host, port)
+	routerID := registerRESTRouter(t, client, base, host, port)
 
-	resp, err := http.Get(base + "/api/v1/routers/" + strconv.FormatInt(routerID, 10) + "/interfaces")
+	resp, err := client.Get(base + "/api/v1/routers/" + strconv.FormatInt(routerID, 10) + "/interfaces")
 	if err != nil {
 		t.Fatalf("interface list: %v", err)
 	}
@@ -313,7 +318,7 @@ func TestAPIRouterInterfaceTrafficWithoutIDs(t *testing.T) {
 	}
 
 	// The name is what the dropdown falls back to, so it has to work.
-	payload := pollInterfaceTraffic(t, base, routerID, "ether1", http.StatusOK)
+	payload := pollInterfaceTraffic(t, client, base, routerID, "ether1", http.StatusOK)
 	if payload.InterfaceName != "ether1" || len(payload.Points) != 1 {
 		t.Fatalf("payload = %+v, want one ether1 sample", payload)
 	}
@@ -322,5 +327,5 @@ func TestAPIRouterInterfaceTrafficWithoutIDs(t *testing.T) {
 	}
 
 	// An id the device never offered is not silently accepted either.
-	pollInterfaceTraffic(t, base, routerID, "*1", http.StatusNotFound)
+	pollInterfaceTraffic(t, client, base, routerID, "*1", http.StatusNotFound)
 }

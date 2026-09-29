@@ -18,8 +18,22 @@ Two front doors, on purpose:
 - `http://<board-ip>/admin/` — the **operator panel** (dashboard, routers,
   network, vouchers, sessions, tools). `/admin` redirects to `/admin/`.
 
+The panel is behind a username/password sign-in. On the very first boot the
+controller creates one operator account:
+
+- `ADMIN_PASSWORD` set → that password is used.
+- `ADMIN_PASSWORD` unset → a random 20-character password is generated and
+  written to the log **once**. Read it with `journalctl -u aircoins`.
+
+Seeding only happens while no account exists, so restarting the service never
+resets a password you changed. After the first boot, manage credentials in the
+panel under **Settings**.
+
+These stay reachable without signing in, because paying guests need them:
+`/` (the captive portal), `/portal/login`, `/portal/status`, `/healthz`.
+
 The panel routes are *also* still mounted at the root, so `/routers`,
-`/vouchers`, `/api/v1/...`, `/healthz` and existing bookmarks keep working.
+`/vouchers` and `/api/v1/...` keep working — but they require a session now.
 
 ```bash
 sudo apt update && sudo apt install -y golang-go
@@ -54,13 +68,48 @@ helper and matching sudoers rule.
 | `DASHBOARD_AT_ROOT` | — | Set `1` to put the dashboard back on `/` (portal moves to `/portal`) |
 | `PORTAL_TAGLINE` | `Connect to the Wi-Fi to get online` | Welcome line on the portal landing page |
 | `PORTAL_SUPPORT` | `Ask the front desk for a voucher code.` | Contact line on the portal landing page |
+| `ADMIN_USER` | `admin` | Operator name seeded on **first boot only** |
+| `ADMIN_PASSWORD` | — | Password seeded on first boot; unset means "generate a random one and log it" |
 | `DEFAULT_REDIRECT` | — | Portal fallback when `link-orig` is absent |
+| `ADMIN_SESSION_TTL` | `12h` | How long a panel sign-in stays valid |
 | `API_TIMEOUT` | `12s` | Per-call RouterOS timeout |
 | `SECURE_COOKIES` | — | Set `1` behind HTTPS |
 | `VERSION` | `dev` | Build-time footer version only (`-ldflags "-X main.version=1.0.0"`; `install.sh` uses `AIRCOINS_VERSION=1.0.0`) |
 
 Router API passwords are AES-256-GCM encrypted at rest; without the
 master key a stolen `.db` file is useless.
+
+## Panel security
+
+- **Password hashing** — PBKDF2-HMAC-SHA256, 210 000 iterations, a fresh
+  16-byte random salt per password. The iteration count is stored per row, so
+  it can be raised later while existing hashes keep verifying. An unknown
+  account name still performs a derivation, so response timing does not reveal
+  which names exist. The password is never written to the database or log in
+  clear text.
+- **Sessions** — a 32-byte random token in an `HttpOnly`, `SameSite=Lax`
+  cookie. Only the SHA-256 of the token is stored, so a copied `.db` cannot be
+  replayed as live logins. Logout deletes the row, and changing the password
+  deletes every session, so a stolen cookie dies with the old credentials.
+- **Brute-force protection** — two independent limits, because either alone is
+  defeatable:
+  - per address: 10 attempts a minute;
+  - per account: after 5 consecutive failures the account locks for 15 s,
+    doubling with every further failure up to 15 minutes. A successful sign-in
+    clears the history. The lock is keyed on the account, so spreading guesses
+    across many IPs does not help, and case changes do not reset it.
+
+  Counters are in memory, so a restart clears them.
+- **Minimum length** — 10 characters, enforced in the store as well as the
+  form, so no other caller can create a weak account.
+- **Settings requires the current password**, so a stolen session cannot take
+  the panel over permanently.
+- **`next=` redirects are validated** to stay on this host, closing the open
+  redirect an attacker would otherwise use to phish a sign-in.
+
+Put the controller behind HTTPS and set `SECURE_COOKIES=1`: without TLS the
+session cookie travels in clear text.
+
 
 ## systemd example
 

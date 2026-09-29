@@ -9,7 +9,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"embed"
+	"encoding/base32"
 	"errors"
 	"fmt"
 	"html/template"
@@ -17,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -68,6 +71,12 @@ func run() error {
 		return fmt.Errorf("parse templates: %w", err)
 	}
 
+	// Seed the operator account before the server accepts a single request,
+	// so the panel is never briefly open on a fresh install.
+	if err := bootstrapAdmin(ctx, db, cfg, logger); err != nil {
+		return err
+	}
+
 	h := handlers.New(db, tpl, cfg.Handler)
 	server := &http.Server{
 		Addr:              httpAddr,
@@ -108,6 +117,59 @@ func run() error {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
 	return <-errCh
+}
+
+// bootstrapAdmin creates the panel operator account on a fresh install.
+//
+// It is deliberately a no-op once an account exists, so restarting the service
+// never resets a password the operator changed through /admin/settings. When
+// no ADMIN_PASSWORD is configured a random one is generated and written to the
+// log exactly once - a blank or well-known default would leave the whole
+// router fleet one dictionary away from being exposed.
+func bootstrapAdmin(ctx context.Context, db *database.DB, cfg appConfig, logger *slog.Logger) error {
+	store := db.AdminUsers()
+	count, err := store.Count(ctx)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+
+	username := cfg.Handler.AdminUser
+	password := cfg.Handler.AdminPassword
+	generated := false
+	if password == "" {
+		password, err = randomPassword()
+		if err != nil {
+			return err
+		}
+		generated = true
+	}
+	if err := store.Create(ctx, username, password); err != nil {
+		// A too-short ADMIN_PASSWORD must stop the boot rather than fall back
+		// to a random one the operator never sees.
+		return fmt.Errorf("create admin account: %w", err)
+	}
+
+	if generated {
+		logger.Warn("generated an initial panel password because ADMIN_PASSWORD was not set",
+			"username", username, "password", password)
+	} else {
+		logger.Info("panel account created from ADMIN_USER/ADMIN_PASSWORD", "username", username)
+	}
+	return nil
+}
+
+// randomPassword returns a 20 character base32 password. base32 (not base64)
+// keeps it free of characters that are easy to misread when copied off a log.
+func randomPassword() (string, error) {
+	buf := make([]byte, 20)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate initial admin password: %w", err)
+	}
+	encoded := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(buf)
+	return strings.ToLower(encoded[:20]), nil
 }
 
 // listenError turns the privileged-port failure into an actionable message: a

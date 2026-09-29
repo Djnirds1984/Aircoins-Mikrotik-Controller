@@ -6,7 +6,6 @@ import (
 	"html/template"
 	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
@@ -173,6 +172,12 @@ func newNetworkE2E(t *testing.T, stubURL string) (string, *http.Client) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	// The panel is behind the session guard, so the browser this helper
+	// returns has to be signed in before it can drive a Network editor.
+	if _, err := db.AdminUsers().EnsureAdminUser(ctx, testAdminUser, testAdminPass); err != nil {
+		t.Fatalf("create admin user: %v", err)
+	}
+
 	tpl, err := template.New("").Funcs(TemplateFuncs()).ParseGlob("../" + TemplatePattern)
 	if err != nil {
 		t.Fatalf("parse templates: %v", err)
@@ -182,10 +187,6 @@ func newNetworkE2E(t *testing.T, stubURL string) (string, *http.Client) {
 	web := httptest.NewServer(h.Routes())
 	t.Cleanup(web.Close)
 
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		t.Fatalf("cookie jar: %v", err)
-	}
 	if _, err := db.Routers().Create(ctx, database.Router{
 		Name: "stub", Host: host, Port: port,
 		Username: "aircoins", Password: "s3cret",
@@ -193,7 +194,7 @@ func newNetworkE2E(t *testing.T, stubURL string) (string, *http.Client) {
 	}); err != nil {
 		t.Fatalf("create router: %v", err)
 	}
-	return web.URL, &http.Client{Jar: jar}
+	return web.URL, signedInBrowser(t, web.URL)
 }
 
 // interfaceVLANPageStub answers the reads the VLAN section performs and records

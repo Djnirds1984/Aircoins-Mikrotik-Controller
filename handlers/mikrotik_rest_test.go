@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
@@ -512,6 +511,11 @@ func TestRestEndToEndOverTheWebForm(t *testing.T) {
 	}
 	defer db.Close()
 
+	// The panel is behind the session guard.
+	if _, err := db.AdminUsers().EnsureAdminUser(ctx, testAdminUser, testAdminPass); err != nil {
+		t.Fatalf("create admin user: %v", err)
+	}
+
 	tpl, err := template.New("").Funcs(TemplateFuncs()).ParseGlob("../" + TemplatePattern)
 	if err != nil {
 		t.Fatalf("parse templates: %v", err)
@@ -520,13 +524,9 @@ func TestRestEndToEndOverTheWebForm(t *testing.T) {
 	server := httptest.NewServer(h.Routes())
 	defer server.Close()
 
-	// One client with a cookie jar, exactly like a browser: the CSRF double
-	// submit check needs the token cookie and the form field to match.
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		t.Fatalf("cookie jar: %v", err)
-	}
-	browser := &http.Client{Jar: jar}
+	// One client with a cookie jar, exactly like a browser: the session cookie
+	// and the CSRF double submit token both live there.
+	browser := signedInBrowser(t, server.URL)
 
 	// Register the router over REST only: the stub serves no API port at all, so
 	// a controller that still spoke the legacy API could not answer this form.

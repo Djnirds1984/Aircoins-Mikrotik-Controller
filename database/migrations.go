@@ -98,6 +98,33 @@ CREATE INDEX IF NOT EXISTS vouchers_batch_idx ON vouchers(batch);
 CREATE INDEX IF NOT EXISTS vouchers_router_idx ON vouchers(router_id);
 CREATE INDEX IF NOT EXISTS vouchers_expiry_idx ON vouchers(status, expires_at)`
 
+const adminUsersDDL = `
+CREATE TABLE IF NOT EXISTS admin_users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT COLLATE NOCASE NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    salt          TEXT NOT NULL,
+    iterations    INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    password_changed_at TEXT
+)`
+
+const adminSessionsDDL = `
+CREATE TABLE IF NOT EXISTS admin_sessions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    last_seen  TEXT NOT NULL,
+    remote     TEXT NOT NULL DEFAULT ''
+)`
+
+const adminSessionsIndexesDDL = `
+CREATE INDEX IF NOT EXISTS admin_sessions_expiry_idx ON admin_sessions(expires_at);
+CREATE INDEX IF NOT EXISTS admin_sessions_user_idx ON admin_sessions(user_id)`
+
 const (
 	routersTransportDDL = `ALTER TABLE routers ADD COLUMN transport TEXT NOT NULL DEFAULT 'auto'`
 	routersRestPortDDL  = `ALTER TABLE routers ADD COLUMN rest_port INTEGER NOT NULL DEFAULT 0`
@@ -126,6 +153,15 @@ var migrations = []migration{
 			routersTransportDDL,
 			routersRestPortDDL,
 			routersLastXDDL,
+		},
+	},
+	{
+		version: 3,
+		name:    "admin-auth",
+		statements: []string{
+			adminUsersDDL,
+			adminSessionsDDL,
+			adminSessionsIndexesDDL,
 		},
 	},
 }
