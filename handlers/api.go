@@ -692,8 +692,31 @@ func (h *Handler) apiRouterInterfaceTraffic(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	defer client.Close()
-	iface := r.PathValue("iface")
+	iface := strings.TrimSpace(r.PathValue("iface"))
+	// The dashboard builds this path segment from the interface list, so an
+	// empty or placeholder value means the list carried nothing usable. Say so
+	// instead of asking the device for an interface literally named
+	// "undefined".
+	if iface == "" || iface == "undefined" || iface == "null" {
+		h.writeAPIError(w, http.StatusBadRequest, "validation",
+			"an interface id or name is required in the path")
+		return
+	}
 	stats, err := client.MonitorInterface(r.Context(), iface)
+	if err != nil && interfaceNeedsLookup(err) {
+		// A print filtered by an id the device cannot resolve answers with no
+		// rows, or rejects the API-only ".id" attribute outright: either way
+		// the graph stayed empty behind "Failed to load traffic data". Resolve
+		// the interface by id or name before giving up on it.
+		resolved, lookupErr := client.FindInterface(r.Context(), iface)
+		if lookupErr == nil {
+			h.log.Debug("traffic interface resolved from the interface list",
+				"router", router.ID, "interface", iface)
+			stats, err = resolved, nil
+		} else {
+			err = lookupErr
+		}
+	}
 	if err != nil {
 		if errors.Is(err, ErrRouterNotFound) {
 			h.writeAPIError(w, http.StatusNotFound, "not_found",
@@ -719,6 +742,16 @@ func (h *Handler) apiRouterInterfaceTraffic(w http.ResponseWriter, r *http.Reque
 		"tx_rate":        stats.TxRate,
 		"timestamp":      now,
 	})
+}
+
+// interfaceNeedsLookup reports whether a failed interface read is worth
+// retrying against the interface list: the id may be stale, the REST transport
+// may refuse the API-only ".id" filter, or the device may not know the command
+// at all. Connection, credential, permission and timeout failures are
+// surfaced as they are, because a second round trip cannot fix them.
+func interfaceNeedsLookup(err error) bool {
+	return errors.Is(err, ErrRouterNotFound) || errors.Is(err, ErrRouterDevice) ||
+		errors.Is(err, ErrRouterNoCommand)
 }
 
 // apiClientDisconnect ends one hotspot session by client id or username.

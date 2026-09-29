@@ -756,6 +756,85 @@ func (c *MikrotikClient) MonitorInterface(ctx context.Context, id string) (Inter
 	}, nil
 }
 
+// FindInterface resolves an interface by its RouterOS id ("*1") or by its name
+// ("ether1") and returns it with its counters.
+//
+// The dashboard dropdown is filled from InterfaceList, and not every RouterOS
+// build reports ".id" in that reply; a print filtered by an id the device
+// cannot resolve then comes back with no rows at all. Matching the key against
+// the interface list is the one lookup that works on every transport and every
+// RouterOS version, so the traffic endpoint falls back to it before it reports
+// an interface as missing.
+func (c *MikrotikClient) FindInterface(ctx context.Context, key string) (InterfaceStats, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return InterfaceStats{}, &RouterError{Endpoint: c.endpoint, Command: interfacePrintCommand,
+			Message: "no interface id or name was given", Sentinel: ErrRouterNotFound}
+	}
+	interfaces, err := c.interfaceCatalog(ctx)
+	if err != nil {
+		return InterfaceStats{}, err
+	}
+	for _, iface := range interfaces {
+		if !interfaceMatchesKey(iface, key) {
+			continue
+		}
+		// A single interface read carries the rates and packets the list is
+		// not guaranteed to have (REST merges the monitor-traffic counters
+		// into the first row only). When the device refuses that read, the
+		// row found above is still a usable sample.
+		if stats, readErr := c.MonitorInterface(ctx, iface.Name); readErr == nil {
+			return stats, nil
+		}
+		return iface, nil
+	}
+	return InterfaceStats{}, &RouterError{Endpoint: c.endpoint, Command: interfacePrintCommand,
+		Message:  fmt.Sprintf("interface %q does not exist on the device", key),
+		Sentinel: ErrRouterNotFound}
+}
+
+// interfaceMatchesKey reports whether a row carries key as its id or as its
+// name. Ids are compared exactly, names case-insensitively: the dropdown uses
+// whichever of the two the device reported.
+func interfaceMatchesKey(iface InterfaceStats, key string) bool {
+	if iface.ID != "" && iface.ID == key {
+		return true
+	}
+	return iface.Name != "" && strings.EqualFold(strings.TrimSpace(iface.Name), key)
+}
+
+// interfaceCatalog lists the interfaces a lookup searches through.
+// InterfaceList is tried first because it also carries the counters; a device
+// that refuses ".sum" or ".proplist" - or answers an empty list - still gets
+// the plain print, so resolving an interface never depends on the statistics
+// extension.
+func (c *MikrotikClient) interfaceCatalog(ctx context.Context) ([]InterfaceStats, error) {
+	if interfaces, err := c.InterfaceList(ctx); err == nil && len(interfaces) > 0 {
+		return interfaces, nil
+	}
+	reply, err := c.Run(ctx, interfacePrintCommand)
+	if err != nil {
+		return nil, err
+	}
+	interfaces := make([]InterfaceStats, 0, len(reply.Re))
+	for _, row := range reply.Re {
+		interfaces = append(interfaces, InterfaceStats{
+			ID:         row[".id"],
+			Name:       row["name"],
+			Type:       row["type"],
+			MTU:        parseInt64(row["mtu"]),
+			MACAddress: row["mac-address"],
+			RxBytes:    parseInt64(row["rx-byte"]),
+			TxBytes:    parseInt64(row["tx-byte"]),
+			RxPackets:  parseInt64(row["rx-packet"]),
+			TxPackets:  parseInt64(row["tx-packet"]),
+			RxRate:     parseInt64(row["rx-rate"]),
+			TxRate:     parseInt64(row["tx-rate"]),
+		})
+	}
+	return interfaces, nil
+}
+
 // InterfaceTraffic is a single data point for the traffic graph.
 type InterfaceTraffic struct {
 	Timestamp time.Time

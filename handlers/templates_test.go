@@ -79,6 +79,14 @@ func TestDashboardScriptStructure(t *testing.T) {
 		"if(routerSelect.value)",
 		"currentRouterId !== routerId",
 		"refreshBtn.disabled = false;",
+		// Guards the "Failed to load traffic data" regression: an interface
+		// reported without an id falls back to its name, the id is escaped for
+		// the URL, the API's own message is surfaced, and a failed poll keeps
+		// the last graph on screen instead of blanking it.
+		"function addInterfaceOption",
+		"iface.id || iface.name",
+		"encodeURIComponent(interfaceId)",
+		"Failed to load traffic data (HTTP ",
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("script block is missing %q", want)

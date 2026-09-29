@@ -268,6 +268,9 @@ canvas#trafficCanvas{
   let currentRouterId = null;
   let currentInterfaceId = null;
   let trafficData = [];
+  // trafficSeriesKey is the interface the samples in trafficData belong to, so
+  // switching interfaces shows the loader instead of the previous graph.
+  let trafficSeriesKey = null;
   let pollingInterval = null;
 
   function resizeCanvas(){
@@ -401,6 +404,7 @@ canvas#trafficCanvas{
     currentRouterId = this.value;
     currentInterfaceId = null;
     trafficData = [];
+    trafficSeriesKey = null;
     if(pollingInterval){ clearInterval(pollingInterval); pollingInterval = null; }
     graphContainer.style.display = 'none';
     interfaceInfo.style.display = 'none';
@@ -455,6 +459,22 @@ canvas#trafficCanvas{
     loadInterfaces(currentRouterId);
   }
 
+  // addInterfaceOption adds one interface to the dropdown. The value is the
+  // RouterOS id when the device reported one and the interface name otherwise:
+  // a build that answers the interface print without ".id" used to leave the
+  // option value as the literal string "undefined", and every traffic request
+  // was then for an interface that does not exist. The name is a valid id on
+  // the device, so the fallback keeps the monitor working.
+  function addInterfaceOption(iface){
+    if(!iface) return;
+    const value = iface.id || iface.name;
+    if(!value) return;
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = (iface.name || value) + (iface.type ? ' (' + iface.type + ')' : '');
+    interfaceSelect.appendChild(option);
+  }
+
   async function loadInterfaces(routerId){
     if(!routerId){
       interfaceSelect.innerHTML = '<option value="">— Select an interface —</option>';
@@ -484,7 +504,7 @@ canvas#trafficCanvas{
       interfaceSelect.innerHTML = '<option value="">— Select an interface —</option>';
       const list = Array.isArray(data.interfaces) ? data.interfaces : [];
       for(const iface of list){
-        interfaceSelect.innerHTML += '<option value="' + iface.id + '">' + iface.name + ' (' + iface.type + ')</option>';
+        addInterfaceOption(iface);
       }
       interfaceSelect.disabled = false;
       refreshBtn.disabled = false;
@@ -501,11 +521,23 @@ canvas#trafficCanvas{
   }
   async function loadTrafficData(routerId, interfaceId){
     if(!routerId || !interfaceId) return;
-    loadingGraph.style.display = 'block';
-    graphContainer.style.display = 'none';
+    // The spinner belongs to a new series only: a poll for the interface that
+    // is already on screen must not blank the graph while it is in flight.
+    if(trafficData.length === 0 || trafficSeriesKey !== interfaceId){
+      loadingGraph.style.display = 'block';
+      graphContainer.style.display = 'none';
+    }
     try{
-      const resp = await fetch('/api/v1/routers/' + routerId + '/interfaces/' + interfaceId + '/traffic');
-      if(!resp.ok) throw new Error('Failed to load traffic data');
+      const resp = await fetch('/api/v1/routers/' + encodeURIComponent(routerId) +
+        '/interfaces/' + encodeURIComponent(interfaceId) + '/traffic');
+      if(!resp.ok){
+        // The API answers failures with {code, message}, which names the real
+        // cause (router unreachable, interface gone, ...). A generic string
+        // here left the operator with nothing to act on.
+        const body = await resp.json().catch(function(){ return null; });
+        throw new Error((body && body.message) ||
+          ('Failed to load traffic data (HTTP ' + resp.status + ')'));
+      }
       const data = await resp.json();
       if(!Array.isArray(data.points) || data.points.length === 0){
         throw new Error('No traffic samples returned yet');
@@ -517,6 +549,7 @@ canvas#trafficCanvas{
         rxRate: p.rx_rate,
         txRate: p.tx_rate
       }));
+      trafficSeriesKey = interfaceId;
       const info = data.interface || {};
       document.getElementById('ifaceName').textContent = data.interface_name || info.name || '';
       document.getElementById('ifaceType').textContent = info.type || '—';
@@ -536,6 +569,11 @@ canvas#trafficCanvas{
     }catch(err){
       loadingGraph.style.display = 'none';
       graphStatus.textContent = 'Error: ' + err.message;
+      if(trafficData.length && trafficSeriesKey === interfaceId){
+        // One failed poll must not blank a graph the operator is watching:
+        // keep the last good series until a request succeeds again.
+        graphContainer.style.display = 'block';
+      }
     }
   }
 })();
