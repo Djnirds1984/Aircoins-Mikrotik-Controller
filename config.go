@@ -33,7 +33,10 @@ func loadConfig() (appConfig, string, error) {
 	cfg.Handler.DefaultRedirect = strings.TrimSpace(os.Getenv("DEFAULT_REDIRECT"))
 	cfg.Handler.SecureCookies = envBool("SECURE_COOKIES")
 
-	addr := envOr("ADDR", ":8080")
+	// The panel ships on port 80 so it is reachable as http://<board-ip>/
+	// without a port suffix; install.sh grants the service user
+	// CAP_NET_BIND_SERVICE. ADDR still takes any ":port" or "host:port".
+	addr := envOr("ADDR", ":80")
 	if _, _, err := splitListenAddr(addr); err != nil {
 		return cfg, "", fmt.Errorf("invalid ADDR %q: %w", addr, err)
 	}

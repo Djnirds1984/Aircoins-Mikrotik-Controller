@@ -11,11 +11,14 @@ redirect parameters (`mac`, `ip`, `link-login`, `link-orig`).
 ```bash
 sudo apt update && sudo apt install -y golang-go
 go build -o /tmp/aircoins-controller .
-ADDR=:8080 DB_PATH=data/aircoins.db ./aircoins-controller
+sudo ADDR=:80 DB_PATH=/tmp/aircoins.db ./aircoins-controller
 ```
 
-Open `http://localhost:8080/` (dashboard), `/routers`,
+Open `http://localhost/` (dashboard), `/routers`,
 `/vouchers`, `/sessions`, `/tools`, `/portal/login`, `/healthz`.
+Port 80 is privileged, so the manual run above uses `sudo`; without root run it
+as `ADDR=:8080 DB_PATH=/tmp/aircoins.db ./aircoins-controller`. `install.sh`
+grants the service the capability it needs instead (see `INSTALLATION.md` §F).
 The Tools page manages ZeroTier on the Debian/Ubuntu/Armbian host running
 this panel: it shows installation/service/node/network status, offers a
 restricted one-click installer when `zerotier-cli` is absent, and can join
@@ -31,7 +34,7 @@ helper and matching sudoers rule.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ADDR` | `:8080` | Listen address |
+| `ADDR` | `:80` | Listen address; port 80 serves `http://<board-ip>/` (privileges: `INSTALLATION.md` §F) |
 | `DB_PATH` | `data/aircoins.db` | SQLite file (`:memory:` for tests) |
 | `SECRET_KEY_PATH` | `data/secret.key` | Master key file (created `0600`) |
 | `AIRCOINS_SECRET_KEY` | — | Master key override (base64/hex, 32 bytes) |
@@ -55,10 +58,12 @@ After=network-online.target
 Type=simple
 User=aircoins
 WorkingDirectory=/opt/aircoins
-Environment=ADDR=:8080
+Environment=ADDR=:80
 Environment=DB_PATH=/var/lib/aircoins/aircoins.db
 Environment=SECRET_KEY_PATH=/var/lib/aircoins/secret.key
 Environment=PORTAL_NAME=Aircoins Hotspot
+# Required to bind port 80 while running as the unprivileged User= above.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 ExecStart=/opt/aircoins/aircoins-controller
 Restart=on-failure
 
@@ -76,7 +81,7 @@ WantedBy=multi-user.target
 3. Point the hotspot login page at the portal, preserving variables:
 
 ```html
-<form action="http://controller:8080/portal/login?mac=$(mac)&ip=$(ip)&username=$(username)&link-login=$(link-login)&link-login-only=$(link-login-only)&link-orig=$(link-orig)&server-name=$(server-name)&error=$(error)"
+<form action="http://controller/portal/login?mac=$(mac)&ip=$(ip)&username=$(username)&link-login=$(link-login)&link-login-only=$(link-login-only)&link-orig=$(link-orig)&server-name=$(server-name)&error=$(error)"
   method="post">
   <input name="voucher" placeholder="AIR-XXXX-XXXX">
   <button type="submit">Connect</button>

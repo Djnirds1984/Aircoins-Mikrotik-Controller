@@ -3,13 +3,14 @@
 //
 // Configuration is environment based so it runs unchanged under systemd:
 //
-//	ADDR, DB_PATH, SECRET_KEY_PATH, AIRCOINS_SECRET_KEY, PORTAL_NAME,
-//	DEFAULT_REDIRECT, API_TIMEOUT, SECURE_COOKIES, VERSION
+//	ADDR (default ":80"), DB_PATH, SECRET_KEY_PATH, AIRCOINS_SECRET_KEY,
+//	PORTAL_NAME, DEFAULT_REDIRECT, API_TIMEOUT, SECURE_COOKIES, VERSION
 package main
 
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
@@ -88,7 +89,7 @@ func run() error {
 	go func() {
 		logger.Info("aircoins controller listening", "addr", httpAddr, "portal", cfg.Handler.PortalName, "version", version)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errCh <- err
+			errCh <- listenError(httpAddr, err)
 			return
 		}
 		errCh <- nil
@@ -107,4 +108,15 @@ func run() error {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
 	return <-errCh
+}
+
+// listenError turns the privileged-port failure into an actionable message: a
+// default ADDR of ":80" cannot be bound by a manual, unprivileged run.
+func listenError(addr string, err error) error {
+	if errors.Is(err, syscall.EACCES) {
+		return fmt.Errorf("listen on %s: %w; ports below 1024 need root or "+
+			"CAP_NET_BIND_SERVICE (install.sh sets AmbientCapabilities, or use "+
+			"ADDR=:8080 - see INSTALLATION.md section F)", addr, err)
+	}
+	return err
 }

@@ -15,8 +15,10 @@ version `go.mod` asks for (currently 1.26.5) and otherwise fetches that
 exact official tarball for the detected arch (SHA256-checked); adds
 swap on ≤ 1 GB boards; creates the `aircoins` user, builds
 `CGO_ENABLED=0` (pure-Go SQLite, no libsqlite3), installs a hardened
-systemd unit, writes `/etc/aircoins/aircoins.env`, opens the firewall,
-and smoke-tests `/healthz`.
+systemd unit that serves the panel on **port 80** (the unprivileged
+`aircoins` user gets `CAP_NET_BIND_SERVICE` — see section F), writes
+`/etc/aircoins/aircoins.env`, opens the firewall, and smoke-tests
+`/healthz`.
 
 ## A. One-line install
 
@@ -29,7 +31,7 @@ sudo ./install.sh
 Variants:
 
 ```bash
-sudo ./install.sh --port 8080 --portal-name "My Hotspot"
+sudo ./install.sh --port 8080 --portal-name "My Hotspot"   # move off port 80
 sudo ./install.sh --repo https://github.com/Djnirds1984/Aircoins-Mikrotik-Controller.git --branch main
 sudo ./install.sh --addr 127.0.0.1:8080 --skip-firewall --no-service
 sudo ./install.sh --uninstall
@@ -63,7 +65,8 @@ in `/etc/aircoins/aircoins.env`, then `systemctl restart aircoins`.
 ## C. Post-install checklist
 
 1. `systemctl status aircoins`, `journalctl -u aircoins -f`.
-2. Open `http://<board-ip>:8080/` → dashboard, `/healthz` → `ok`.
+2. Open `http://<board-ip>/` → dashboard, `/healthz` → `ok` (port 80 by
+   default, see section F).
 3. `/routers`: register each MikroTik. Pick the **Connection method** that
    matches your RouterOS setup:
    - `REST over HTTPS (www-ssl)` / `REST over HTTP (www)` — the v7 REST API,
@@ -77,7 +80,7 @@ in `/etc/aircoins/aircoins.env`, then `systemctl restart aircoins`.
 
    Allow the board IP under RouterOS `/ip service` either way.
 4. Point the hotspot login page at
-   `http://<board-ip>:8080/portal/login?mac=$(mac)&ip=$(ip)&...`
+   `http://<board-ip>/portal/login?mac=$(mac)&ip=$(ip)&...`
    (full snippet in `README.md`).
 5. Generate voucher batches under `/vouchers`.
 6. `/tools` manages ZeroTier on this panel host. When the official
@@ -106,10 +109,13 @@ unit `/etc/systemd/system/aircoins.service`.
 ```bash
 go version            # need the version in go.mod (>= 1.26), https://go.dev/dl/
 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o aircoins-controller .
-ADDR=:8080 DB_PATH=/var/lib/aircoins/aircoins.db \
+sudo ADDR=:80 DB_PATH=/var/lib/aircoins/aircoins.db \
 SECRET_KEY_PATH=/var/lib/aircoins/secret.key \
 PORTAL_NAME="Aircoins Hotspot" ./aircoins-controller
 ```
+
+Port 80 is privileged: run it with `sudo` as above, or use `ADDR=:8080`
+without root (section F lists the capability options).
 
 Copy the systemd unit from `install.sh` section 5, adjusting
 `User/WorkingDirectory/EnvironmentFile/ExecStart/ReadWritePaths`.
@@ -130,7 +136,11 @@ Copy the systemd unit from `install.sh` section 5, adjusting
   it expects an `int64`). Fixed in the current source: rebuild from the latest
   `main` and restart the service.
 - `Service unhealthy`: `journalctl -u aircoins -e`; check port clash
-  (`ss -tlnp`) and `DB_PATH` writability.
+  (`ss -tlnp` — an existing web server often owns port 80) and `DB_PATH`
+  writability.
+- `bind: permission denied` while listening on port 80: the unit lost
+  `AmbientCapabilities=CAP_NET_BIND_SERVICE`, or the binary was started by hand
+  without the capability — section F has the fixes.
 - Portal "not linked": set a router portal tag matching hotspot
   `server-name`, or tick Default portal.
 - Router offline: check IP/port, `/ip service` allowed address, API user group,
@@ -139,4 +149,109 @@ Copy the systemd unit from `install.sh` section 5, adjusting
   into **Web port for REST** (80 must be typed explicitly, never left blank).
   `Auto` accepts either protocol, so it is the quickest way to find out.
 - Lost `secret.key`: router passwords are unrecoverable, re-enter them.
+
+## F. The HTTP port (80 by default)
+
+The installer serves the panel on **port 80**, so the dashboard is
+`http://<board-ip>/` and the portal is
+`http://<board-ip>/portal/login?mac=$(mac)&ip=$(ip)&...` - no port suffix.
+`ADDR` in `/etc/aircoins/aircoins.env` is the only knob that decides the
+listen port:
+
+```bash
+sudo sed -i 's|^ADDR=.*|ADDR=0.0.0.0:8080|' /etc/aircoins/aircoins.env   # move off 80
+sudo systemctl restart aircoins
+```
+
+A fresh install picks the port with `--port 8080` (or `--addr host:port`);
+`install.sh` opens that port in the firewall. Every link the panel emits is
+relative (`/portal/login?...`, the flash redirects) and it never prints its own
+host or port, so any port and a reverse proxy both work unchanged.
+
+### Why it can bind a privileged port as a normal user
+
+The unit runs as the unprivileged `aircoins` user, so `install.sh` writes
+`AmbientCapabilities=CAP_NET_BIND_SERVICE` into it. Keep that line, and leave
+`CapabilityBoundingSet=` unset so the `sudo`-based ZeroTier helper can still
+acquire CAP_SETUID/CAP_SETGID. Verified on Linux: a process holding the ambient
+capability binds a privileged port and its `sudo` child still runs as uid 0.
+
+If you manage the unit yourself, the alternatives are:
+
+- `sudo setcap cap_net_bind_service=+ep /opt/aircoins/aircoins-controller` -
+  scoped to the binary only, but file capabilities are ignored on `nosuid`
+  mounts (`/tmp` is one, `/opt` is not) and are lost whenever the binary is
+  replaced, so `install.sh` would have to reapply them.
+- `sudo sysctl -w net.ipv4.ip_unprivileged_port_start=80` - system-wide;
+  persist it in `/etc/sysctl.d/`.
+- `ADDR=0.0.0.0:8080` - needs no privilege at all.
+
+A manual run that reports `bind: permission denied` on port 80 hit exactly this
+case: run it with `sudo`, add the capability, or use `ADDR=:8080`.
+
+### If something else already owns port 80
+
+Check first with `sudo ss -tlnp | grep ':80 '`; then move the panel
+(`ADDR=0.0.0.0:8080` plus an iptables redirect) or reverse proxy it.
+
+### Keep the panel on 8080 and redirect 80 to it
+
+```bash
+sudo ./install.sh --port 8080          # or ADDR=0.0.0.0:8080 + restart
+sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports 8080
+sudo apt-get install -y iptables-persistent && sudo netfilter-persistent save
+```
+
+No capability is needed in this layout. The redirect happens in the network
+stack, so `curl http://127.0.0.1/` from the board itself still needs `:8080`
+(add an OUTPUT rule if you want that too).
+
+### Reverse proxy on 80 → 127.0.0.1:8080
+
+nginx:
+
+```nginx
+server {
+    listen 80 default_server;
+    server_name _;
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Caddy: `:80 { reverse_proxy 127.0.0.1:8080 }`. Set `ADDR=127.0.0.1:8080` in
+`/etc/aircoins/aircoins.env` so only the proxy can reach the panel (it then
+needs no privileged port at all), and `SECURE_COOKIES=1` once the proxy
+terminates TLS. The panel already honours `X-Forwarded-For` / `X-Real-IP` for
+client addresses.
+
+Whichever layout you pick, keep the form action in the hotspot login page and
+the walled-garden entry for the panel in sync with the address clients use
+(`dst-port` left empty allows any port).
+
+### MikroTik side: which address answers
+
+- `192.168.254.139` is the board's own address. When MikroTik hands it out
+  over DHCP, pin it so the URL cannot move:
+  `/ip dhcp-server lease make-static [find address=192.168.254.139]`, then
+  `/ip dns static add name=aircoins address=192.168.254.139` to use
+  `http://aircoins/`.
+- The router's own address (`192.168.254.1`) keeps serving the hotspot login
+  page, and the hotspot service owns the router's port 80, so it cannot be
+  re-pointed at the panel. To reach the panel through the router's address,
+  DNAT a free port instead:
+
+  ```text
+  /ip firewall nat add chain=dstnat protocol=tcp dst-port=8090 \
+      dst-address=192.168.254.1 action=dst-nat \
+      to-addresses=192.168.254.139 to-ports=80
+  ```
+
+- The panel's own port is unrelated to **Web port for REST** on `/routers`,
+  which is the router's `www`/`www-ssl` port.
 

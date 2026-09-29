@@ -4,12 +4,14 @@
 # Allwinner / Amlogic) and x64 mini PCs running Ubuntu/Debian.
 #
 # Usage: sudo ./install.sh [options]   (see --help for all flags)
+# Serves the panel on port 80 (http://<board-ip>/) by default; the service
+# user is granted CAP_NET_BIND_SERVICE so it can bind that privileged port.
 # Idempotent: re-running upgrades the binary in place.
 set -euo pipefail
 
 APP_NAME="aircoins-controller"
 SERVICE_NAME="aircoins"
-DEFAULT_PORT="8080"
+DEFAULT_PORT="80"
 DEFAULT_INSTALL_DIR="/opt/aircoins"
 DEFAULT_DATA_DIR="/var/lib/aircoins"
 DEFAULT_USER="aircoins"
@@ -55,6 +57,8 @@ while [[ $# -gt 0 ]]; do
       echo "Options: --port --addr --install-dir --data-dir --user"
       echo "  --portal-name --go-version --repo --branch --skip-firewall"
       echo "  --no-service --uninstall -h/--help"
+      echo "Dashboard is served on port $DEFAULT_PORT by default (--port 8080"
+      echo "  moves it back off the privileged port)."
       echo "Env: AIRCOINS_VERSION=1.2.3 (footer version), GO_MIRROR,"
       echo "  GOCACHE, GOMODCACHE"
       exit 0 ;;
@@ -352,9 +356,12 @@ ProtectSystem=false
 ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=$DATA_DIR
+# Port 80 is privileged, so the unprivileged service user needs the bind
+# capability. A process holding it was verified to still run sudo correctly,
+# which is what the root helper below depends on.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 # Do not set CapabilityBoundingSet= (empty): sudo must be able to acquire
 # CAP_SETUID/CAP_SETGID while entering the fixed root helper.
-AmbientCapabilities=
 
 [Install]
 WantedBy=multi-user.target
@@ -410,8 +417,11 @@ INSTALLED_VERSION="$($INSTALL_DIR/$APP_NAME --version 2>/dev/null || true)"
 
 HOST_PART="${ADDR%%:*}"
 if [[ "$HOST_PART" == "0.0.0.0" || -z "$HOST_PART" ]]; then HOST_PART="127.0.0.1"; fi
-if curl -fsS --max-time 10 "http://${HOST_PART}:${LISTEN_PORT}/healthz" | grep -q ok; then
-  log "Health check OK: http://${HOST_PART}:${LISTEN_PORT}/healthz"
+# Browsers already default to port 80, so it is left out of the printed URLs.
+URL_HOST="$HOST_PART"
+(( LISTEN_PORT == 80 )) || URL_HOST="${HOST_PART}:${LISTEN_PORT}"
+if curl -fsS --max-time 10 "http://${URL_HOST}/healthz" | grep -q ok; then
+  log "Health check OK: http://${URL_HOST}/healthz"
 else
   warn "Health check failed; recent logs:"
   journalctl -u "$SERVICE_NAME" --no-pager -n 30 2>/dev/null || true
@@ -421,9 +431,9 @@ fi
 cat <<EOF
 
 ==================== Aircoins installed ====================
-Dashboard : http://${HOST_PART}:${LISTEN_PORT}/
-Portal    : http://${HOST_PART}:${LISTEN_PORT}/portal/login
-Health    : http://${HOST_PART}:${LISTEN_PORT}/healthz
+Dashboard : http://${URL_HOST}/
+Portal    : http://${URL_HOST}/portal/login
+Health    : http://${URL_HOST}/healthz
 Binary    : $INSTALL_DIR/$APP_NAME ($INSTALLED_VERSION)
 Data      : $DATA_DIR/aircoins.db (+ secret.key)
 Config    : $ENV_FILE
