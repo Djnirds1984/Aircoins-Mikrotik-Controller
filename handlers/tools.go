@@ -41,7 +41,13 @@ type hostZeroTierNetwork struct {
 	Name   string
 	Type   string
 	Status string
-	IPs    []string
+	// Interface is the OS network device ZeroTier created for the network.
+	// zerotier-cli reports it as "portDeviceName".
+	Interface string
+	// IPs holds the addresses shown in the "Interface / IP" column: the
+	// ZeroTier-managed assignments when the service reports them, otherwise
+	// the addresses the kernel has on the interface.
+	IPs []string
 }
 
 type hostZeroTierStatus struct {
@@ -129,36 +135,128 @@ func readHostZeroTierStatus(ctx context.Context) hostZeroTierStatus {
 	result.NodeID, result.Online, result.Version = info.Address, info.Online, info.Version
 	output, err = exec.CommandContext(ctx, "sudo", "-n", zeroTierInstallHelper, "listnetworks").CombinedOutput()
 	if err != nil {
+		detail := truncateText(strings.TrimSpace(string(output)), 200)
+		if detail == "" {
+			detail = err.Error()
+		}
+		result.Error = "zerotier-cli reported the node status, but the joined networks could not be read: " + detail
 		return result
 	}
-	var rows []struct {
-		ID        string          `json:"id"`
-		Name      string          `json:"name"`
-		Type      string          `json:"type"`
-		Status    string          `json:"status"`
-		IPAddress json.RawMessage `json:"ipAddress"`
-	}
-	if json.Unmarshal(output, &rows) != nil {
+	networks, err := parseHostZeroTierNetworks(output)
+	if err != nil {
+		result.Error = "could not read the ZeroTier network list returned by zerotier-cli."
 		return result
 	}
-	for _, row := range rows {
-		result.Networks = append(result.Networks, hostZeroTierNetwork{
-			ID: row.ID, Name: row.Name, Type: row.Type, Status: row.Status, IPs: zeroTierIPs(row.IPAddress),
-		})
+	for i := range networks {
+		// assignedAddresses only lists ZeroTier-managed addresses, so fall back
+		// to the addresses the kernel has on the interface (gateways, DHCP or
+		// manually configured networks leave it empty).
+		if len(networks[i].IPs) == 0 {
+			networks[i].IPs = hostInterfaceAddresses(ctx, networks[i].Interface)
+		}
 	}
+	result.Networks = networks
 	return result
 }
 
-func zeroTierIPs(raw json.RawMessage) []string {
-	var list []string
-	if json.Unmarshal(raw, &list) == nil {
-		return list
+// parseHostZeroTierNetworks decodes `zerotier-cli -j listnetworks` (the format
+// the aircoins-install-zerotier helper runs). ZeroTier reports the interface as
+// "portDeviceName" and the assigned addresses as "assignedAddresses"; older or
+// alternative builds use "ipAddress" or "ipAssignments" instead.
+func parseHostZeroTierNetworks(output []byte) ([]hostZeroTierNetwork, error) {
+	var rows []struct {
+		ID              string          `json:"id"`
+		NWID            string          `json:"nwid"`
+		Name            string          `json:"name"`
+		Type            string          `json:"type"`
+		Status          string          `json:"status"`
+		PortDeviceName  string          `json:"portDeviceName"`
+		AssignedAddress json.RawMessage `json:"assignedAddresses"`
+		IPAddress       json.RawMessage `json:"ipAddress"`
+		IPAssignments   json.RawMessage `json:"ipAssignments"`
 	}
-	var one string
-	if json.Unmarshal(raw, &one) == nil && strings.TrimSpace(one) != "" {
-		return []string{one}
+	if err := json.Unmarshal(output, &rows); err != nil {
+		return nil, err
 	}
-	return nil
+	networks := make([]hostZeroTierNetwork, 0, len(rows))
+	for _, row := range rows {
+		id := strings.TrimSpace(row.ID)
+		if id == "" {
+			id = strings.TrimSpace(row.NWID)
+		}
+		networks = append(networks, hostZeroTierNetwork{
+			ID:        id,
+			Name:      strings.TrimSpace(row.Name),
+			Type:      strings.TrimSpace(row.Type),
+			Status:    strings.TrimSpace(row.Status),
+			Interface: strings.TrimSpace(row.PortDeviceName),
+			IPs:       zeroTierAddresses(row.AssignedAddress, row.IPAddress, row.IPAssignments),
+		})
+	}
+	return networks, nil
+}
+
+// zeroTierAddresses collects the addresses of a network row. Every candidate is
+// accepted either as a JSON array of strings or as a single string.
+func zeroTierAddresses(values ...json.RawMessage) []string {
+	var addresses []string
+	seen := make(map[string]bool, len(values))
+	add := func(address string) {
+		if address = strings.TrimSpace(address); address == "" || seen[address] {
+			return
+		}
+		seen[address] = true
+		addresses = append(addresses, address)
+	}
+	for _, raw := range values {
+		if len(raw) == 0 {
+			continue
+		}
+		var list []string
+		if json.Unmarshal(raw, &list) == nil {
+			for _, address := range list {
+				add(address)
+			}
+			continue
+		}
+		var one string
+		if json.Unmarshal(raw, &one) == nil {
+			add(one)
+		}
+	}
+	return addresses
+}
+
+// hostInterfaceAddresses reads the addresses the kernel has on an interface.
+// It is used when ZeroTier reports no managed address for a joined network, so
+// the panel can still show the tunnel IP. Link-local IPv6 addresses are skipped
+// because every ZeroTier interface has one.
+func hostInterfaceAddresses(ctx context.Context, name string) []string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	output, err := exec.CommandContext(ctx, "ip", "-o", "addr", "show", "dev", name).Output()
+	if err != nil {
+		return nil
+	}
+	var addresses []string
+	seen := make(map[string]bool)
+	for _, line := range strings.Split(string(output), "\n") {
+		fields := strings.Fields(line)
+		for i := 0; i+1 < len(fields); i++ {
+			if fields[i] != "inet" && fields[i] != "inet6" {
+				continue
+			}
+			address := fields[i+1]
+			if address == "" || seen[address] || strings.HasPrefix(strings.ToLower(address), "fe80:") {
+				continue
+			}
+			seen[address] = true
+			addresses = append(addresses, address)
+		}
+	}
+	return addresses
 }
 
 func validHostZeroTierNetworkID(value string) bool {

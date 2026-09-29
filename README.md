@@ -19,7 +19,11 @@ Open `http://localhost:8080/` (dashboard), `/routers`,
 The Tools page manages ZeroTier on the Debian/Ubuntu/Armbian host running
 this panel: it shows installation/service/node/network status, offers a
 restricted one-click installer when `zerotier-cli` is absent, and can join
-or leave a validated 16-character ZeroTier network. Rerun `sudo ./install.sh`
+or leave a validated 16-character ZeroTier network. Each joined network is
+listed with the interface ZeroTier created (`portDeviceName`) and the
+addresses assigned to it; when ZeroTier reports no managed address, the
+addresses the kernel has on that interface are shown instead. Rerun
+`sudo ./install.sh`
 after upgrading an existing deployment to provision its no-argument root
 helper and matching sudoers rule.
 

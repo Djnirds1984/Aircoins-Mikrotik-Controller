@@ -50,7 +50,7 @@
           <tr>
             <td><strong>{{if .Name}}{{.Name}}{{else}}ZeroTier network{{end}}</strong><div class="mono muted">{{.ID}}</div></td>
             <td>{{default .Type "unknown"}}</td>
-            <td class="mono">{{range $i, $ip := .IPs}}{{if $i}}<br>{{end}}{{$ip}}{{end}}</td>
+            <td class="mono">{{if .Interface}}{{.Interface}}{{else}}—{{end}}{{if .IPs}}{{range .IPs}}<br>{{.}}{{end}}{{else}}<div class="muted">no IP assigned yet</div>{{end}}</td>
             <td><span class="badge {{if eq .Status "OK"}}green{{else}}slate{{end}}">{{default .Status "UNKNOWN"}}</span></td>
             <td>
               <form method="post" action="/tools/zerotier/leave">

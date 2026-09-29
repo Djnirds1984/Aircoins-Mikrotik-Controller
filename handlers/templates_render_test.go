@@ -395,12 +395,12 @@ func TestToolsTemplateShowsHostZeroTierState(t *testing.T) {
 		OSName: "Debian GNU/Linux 12", OSID: "debian", Architecture: "aarch64",
 		SupportedOS: true, Installed: true, Running: true, Online: true,
 		NodeID: "b8034f7f60", Version: "1.14.2",
-		Networks: []hostZeroTierNetwork{{ID: "e4da7455b23ac67d", Name: "CITYCONNECT", Type: "Public", Status: "OK", IPs: []string{"10.242.137.78/16"}}},
+		Networks: []hostZeroTierNetwork{{ID: "e4da7455b23ac67d", Name: "CITYCONNECT", Type: "Public", Status: "OK", Interface: "zt6a2xynq4", IPs: []string{"10.242.137.78/16"}}},
 	}}
 	body := renderPage(t, "tools.html", view)
 	for _, want := range []string{
 		`<a href="/tools" class="active">Tools</a>`, `b8034f7f60`, `RUNNING`,
-		`CITYCONNECT`, `e4da7455b23ac67d`, `10.242.137.78/16`, `Already installed.`,
+		`CITYCONNECT`, `e4da7455b23ac67d`, `zt6a2xynq4`, `10.242.137.78/16`, `Already installed.`,
 		`action="/tools/zerotier/leave"`, `action="/tools/zerotier/join"`,
 	} {
 		if !strings.Contains(body, want) {

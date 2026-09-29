@@ -88,7 +88,12 @@ in `/etc/aircoins/aircoins.env`, then `systemctl restart aircoins`.
    installs from ZeroTier's official `https://install.zerotier.com` script.
    On an existing deployment, rerun `sudo ./install.sh` to provision this
    helper and its updated systemd unit. The page can then show service and
-   node status, and Join/Leave networks without accepting shell input.
+   node status, Join/Leave networks without accepting shell input, and list
+   each joined network with its tunnel interface and assigned IP addresses.
+   Those come from `zerotier-cli -j listnetworks` (`portDeviceName` and
+   `assignedAddresses`); when ZeroTier reports no managed address for a
+   network - for example a DHCP or manually addressed network - the panel
+   falls back to the addresses the kernel has on that interface.
 
 Paths: binary `/opt/aircoins/aircoins-controller`, DB
 `/var/lib/aircoins/aircoins.db`, master key
