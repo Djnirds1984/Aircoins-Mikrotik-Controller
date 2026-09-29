@@ -2,13 +2,13 @@ package handlers
 
 import (
 	"context"
+	"strconv"
 	"strings"
 )
 
 const (
-	ipPoolMenu     = "/ip/pool"
-	bridgeMenu     = "/interface/bridge"
-	bridgeVLANMenu = bridgeMenu + "/vlan"
+	ipPoolMenu = "/ip/pool"
+	vlanMenu   = "/interface/vlan"
 )
 
 // IPPool is one entry of /ip/pool/print. Ranges keeps RouterOS's native
@@ -52,61 +52,52 @@ func (c *MikrotikClient) AddIPPool(ctx context.Context, name, ranges, nextPool, 
 	return c.addROSObject(ctx, ipPoolMenu, args)
 }
 
-// BridgeVLAN is one /interface/bridge/vlan entry. VLANIDs may be one id or a
-// RouterOS range, so one table naturally covers individual and ranged VLANs.
-type BridgeVLAN struct {
-	ID       string
-	Bridge   string
-	VLANIDs  string
-	Tagged   string
-	Untagged string
-	Current  string
-	Disabled bool
+// InterfaceVLAN is one /interface/vlan entry: a VLAN interface that tags a
+// single VLAN ID on one parent interface, a bridge or a physical port.
+type InterfaceVLAN struct {
+	ID        string
+	Name      string
+	Interface string
+	VLANID    string
+	MTU       string
+	Comment   string
+	Running   bool
+	Disabled  bool
 }
 
-// BridgeVLANs lists the VLAN forwarding table of every bridge.
-func (c *MikrotikClient) BridgeVLANs(ctx context.Context) ([]BridgeVLAN, error) {
-	reply, err := c.Run(ctx, bridgeVLANMenu+"/print")
+// InterfaceVLANs lists the VLAN interfaces configured on a device.
+func (c *MikrotikClient) InterfaceVLANs(ctx context.Context) ([]InterfaceVLAN, error) {
+	reply, err := c.Run(ctx, vlanMenu+"/print")
 	if err != nil {
 		return nil, err
 	}
-	entries := make([]BridgeVLAN, 0, len(reply.Re))
+	entries := make([]InterfaceVLAN, 0, len(reply.Re))
 	for _, row := range reply.Re {
-		entries = append(entries, BridgeVLAN{
-			ID: row[".id"], Bridge: row["bridge"], VLANIDs: row["vlan-ids"],
-			Tagged: row["tagged"], Untagged: row["untagged"],
-			Current: row["current-tagged"], Disabled: parseRouterOSBool(row["disabled"]),
+		entries = append(entries, InterfaceVLAN{
+			ID: row[".id"], Name: row["name"], Interface: row["interface"],
+			VLANID: row["vlan-id"], MTU: row["mtu"], Comment: row["comment"],
+			Running:  parseRouterOSBool(row["running"]),
+			Disabled: parseRouterOSBool(row["disabled"]),
 		})
 	}
 	return entries, nil
 }
 
-// Bridges lists bridge names, the required owner of a bridge VLAN entry.
-func (c *MikrotikClient) Bridges(ctx context.Context) ([]string, error) {
-	reply, err := c.Run(ctx, bridgeMenu+"/print", "=.proplist=name")
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, 0, len(reply.Re))
-	for _, row := range reply.Re {
-		if name := strings.TrimSpace(row["name"]); name != "" {
-			names = append(names, name)
-		}
-	}
-	return names, nil
-}
-
-// AddBridgeVLAN creates one individual VLAN or a VLAN-ID range on a bridge.
-func (c *MikrotikClient) AddBridgeVLAN(ctx context.Context, bridge, vlanIDs, tagged, untagged string) (string, error) {
+// AddInterfaceVLAN creates one /interface/vlan entry, tagging a single VLAN ID
+// on the given parent interface. The parent is any interface of the device, a
+// bridge (bridge1) or a physical port (ether5); ranges are never sent, because
+// every VLAN an operator wants becomes one interface of its own.
+func (c *MikrotikClient) AddInterfaceVLAN(ctx context.Context, name, parent string, vlanID int, mtu, comment string) (string, error) {
 	args := []string{
-		"=bridge=" + strings.TrimSpace(bridge),
-		"=vlan-ids=" + strings.TrimSpace(vlanIDs),
+		"=name=" + strings.TrimSpace(name),
+		"=interface=" + strings.TrimSpace(parent),
+		"=vlan-id=" + strconv.Itoa(vlanID),
 	}
-	if value := strings.TrimSpace(tagged); value != "" {
-		args = append(args, "=tagged="+value)
+	if value := strings.TrimSpace(mtu); value != "" {
+		args = append(args, "=mtu="+value)
 	}
-	if value := strings.TrimSpace(untagged); value != "" {
-		args = append(args, "=untagged="+value)
+	if value := strings.TrimSpace(comment); value != "" {
+		args = append(args, "=comment="+value)
 	}
-	return c.addROSObject(ctx, bridgeVLANMenu, args)
+	return c.addROSObject(ctx, vlanMenu, args)
 }

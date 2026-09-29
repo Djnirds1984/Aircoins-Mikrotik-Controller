@@ -24,8 +24,8 @@ func mustParseURL(t *testing.T, raw string) *url.URL {
 	return parsed
 }
 
-// networkStub answers the four menus the Network page's pool and VLAN sections
-// read and write, so the device layer is exercised over real HTTP.
+// networkStub answers the menus the Network page's pool and VLAN interface
+// sections read and write, so the device layer is exercised over real HTTP.
 func networkStub(t *testing.T) (*httptest.Server, *[]string) {
 	t.Helper()
 	var puts []string
@@ -47,17 +47,12 @@ func networkStub(t *testing.T) (*httptest.Server, *[]string) {
 			raw, _ := io.ReadAll(r.Body)
 			puts = append(puts, string(raw))
 			_, _ = w.Write([]byte(`{".id":"*1","name":"hotspot_pool","ranges":"10.5.50.10-10.5.50.200"}`))
-		case r.URL.Path == "/rest/interface/bridge/vlan" && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(`[{"bridge":"bridge1","vlan-ids":"100-120","tagged":"ether2","untagged":"ether3","current-tagged":"ether2","disabled":false}]`))
-		case r.URL.Path == "/rest/interface/bridge/vlan" && r.Method == http.MethodPut:
+		case r.URL.Path == "/rest/interface/vlan" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`[{"name":"vlan100","interface":"bridge1","vlan-id":"100","mtu":"1500","comment":"guest","running":true,"disabled":false}]`))
+		case r.URL.Path == "/rest/interface/vlan" && r.Method == http.MethodPut:
 			raw, _ := io.ReadAll(r.Body)
 			puts = append(puts, string(raw))
-			_, _ = w.Write([]byte(`{".id":"*2","bridge":"bridge1","vlan-ids":"100-120"}`))
-		case r.URL.Path == "/rest/interface/bridge" && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(`[{"name":"bridge1"},{"name":"bridge-hotspot"}]`))
-		case r.URL.Path == "/rest/interface/bridge/print" && r.Method == http.MethodPost:
-			// A print carrying .proplist travels in the universal command form.
-			_, _ = w.Write([]byte(`[{"name":"bridge1"},{"name":"bridge-hotspot"}]`))
+			_, _ = w.Write([]byte(`{".id":"*3","name":"vlan200","interface":"ether5","vlan-id":"200"}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":404,"message":"not found"}`))
@@ -109,37 +104,30 @@ func TestIPPoolDeviceLayer(t *testing.T) {
 	}
 }
 
-func TestBridgeVLANDeviceLayer(t *testing.T) {
+func TestInterfaceVLANDeviceLayer(t *testing.T) {
 	server, puts := networkStub(t)
 	client := networkTestClient(t, server)
 	ctx := context.Background()
 
-	entries, err := client.BridgeVLANs(ctx)
+	entries, err := client.InterfaceVLANs(ctx)
 	if err != nil {
-		t.Fatalf("BridgeVLANs: %v", err)
+		t.Fatalf("InterfaceVLANs: %v", err)
 	}
 	if len(entries) != 1 {
 		t.Fatalf("expected one entry, got %#v", entries)
 	}
 	entry := entries[0]
-	if entry.VLANIDs != "100-120" || entry.Bridge != "bridge1" || entry.Disabled {
+	if entry.Name != "vlan100" || entry.Interface != "bridge1" || entry.VLANID != "100" ||
+		entry.MTU != "1500" || !entry.Running || entry.Disabled {
 		t.Fatalf("unexpected entry: %#v", entry)
 	}
 
-	bridges, err := client.Bridges(ctx)
+	id, err := client.AddInterfaceVLAN(ctx, "vlan200", "ether5", 200, "1500", "guest")
 	if err != nil {
-		t.Fatalf("Bridges: %v", err)
-	}
-	if len(bridges) != 2 || bridges[0] != "bridge1" {
-		t.Fatalf("unexpected bridges: %#v", bridges)
-	}
-
-	id, err := client.AddBridgeVLAN(ctx, "bridge1", "100-120", "ether2", "ether3")
-	if err != nil {
-		t.Fatalf("AddBridgeVLAN: %v", err)
+		t.Fatalf("AddInterfaceVLAN: %v", err)
 	}
 	if !strings.Contains(id, "*") {
-		t.Fatalf("AddBridgeVLAN id = %q, want the id the device reported", id)
+		t.Fatalf("AddInterfaceVLAN id = %q, want the id the device reported", id)
 	}
 	if len(*puts) != 1 {
 		t.Fatalf("expected one PUT body, got %d", len(*puts))
@@ -148,55 +136,64 @@ func TestBridgeVLANDeviceLayer(t *testing.T) {
 	if err := json.Unmarshal([]byte((*puts)[0]), &fields); err != nil {
 		t.Fatalf("PUT body %q is not an object: %v", (*puts)[0], err)
 	}
-	if fields["vlan-ids"] != "100-120" || fields["bridge"] != "bridge1" ||
-		fields["tagged"] != "ether2" || fields["untagged"] != "ether3" {
+	if fields["name"] != "vlan200" || fields["interface"] != "ether5" ||
+		fields["vlan-id"] != "200" || fields["mtu"] != "1500" || fields["comment"] != "guest" {
 		t.Fatalf("unexpected PUT fields: %#v", fields)
 	}
+	// The parent is a physical port here and a bridge above: /interface/vlan
+	// takes any interface of the device, so nothing about the request is
+	// bridge specific.
+	if _, bridge := fields["bridge"]; bridge {
+		t.Errorf("interface VLAN unexpectedly sent bridge: %#v", fields)
+	}
 
-	if _, err := client.AddBridgeVLAN(ctx, "bridge1", "200", "", ""); err != nil {
-		t.Fatalf("AddBridgeVLAN without ports: %v", err)
+	// MTU and comment are optional: a blank one is left out so the device
+	// default stands.
+	if _, err := client.AddInterfaceVLAN(ctx, "vlan300", "bridge1", 300, "", ""); err != nil {
+		t.Fatalf("AddInterfaceVLAN without optional fields: %v", err)
 	}
 	if len(*puts) != 2 {
 		t.Fatalf("expected two PUT bodies, got %d", len(*puts))
 	}
 	fields = nil
 	if err := json.Unmarshal([]byte((*puts)[1]), &fields); err != nil {
-		t.Fatalf("portless PUT body %q is not an object: %v", (*puts)[1], err)
+		t.Fatalf("minimal PUT body %q is not an object: %v", (*puts)[1], err)
 	}
-	if fields["vlan-ids"] != "200" || fields["bridge"] != "bridge1" {
-		t.Fatalf("unexpected portless VLAN fields: %#v", fields)
+	if fields["vlan-id"] != "300" || fields["interface"] != "bridge1" {
+		t.Fatalf("unexpected minimal VLAN fields: %#v", fields)
 	}
-	if _, tagged := fields["tagged"]; tagged {
-		t.Errorf("portless VLAN unexpectedly sent tagged: %#v", fields)
+	if _, mtu := fields["mtu"]; mtu {
+		t.Errorf("blank MTU unexpectedly sent: %#v", fields)
 	}
-	if _, untagged := fields["untagged"]; untagged {
-		t.Errorf("portless VLAN unexpectedly sent untagged: %#v", fields)
+	if _, comment := fields["comment"]; comment {
+		t.Errorf("blank comment unexpectedly sent: %#v", fields)
 	}
 }
 
-func TestValidVLANIDSpec(t *testing.T) {
+func TestParseVLANID(t *testing.T) {
 	cases := []struct {
 		value string
-		want  bool
+		want  int
+		ok    bool
 	}{
-		{"100", true},
-		{"100-120", true},
-		{"1,100,4094", true},
-		{"100-120,200-210", true},
-		{"10-10", true},
-		{"", false},
-		{"0", false},
-		{"4095", false},
-		{"120-100", false},
-		{"100-", false},
-		{"-120", false},
-		{"abc", false},
-		{"100-abc", false},
-		{"100,abc", false},
+		{"100", 100, true},
+		{"1", 1, true},
+		{"4094", 4094, true},
+		{" 100 ", 100, true},
+		{"", 0, false},
+		{"0", 0, false},
+		{"4095", 0, false},
+		// A range is not one VLAN ID: the editor creates one interface at a
+		// time, so every ranged form is refused here.
+		{"100-120", 0, false},
+		{"100,200", 0, false},
+		{"abc", 0, false},
+		{"100-abc", 0, false},
 	}
 	for _, tc := range cases {
-		if got := validVLANIDSpec(tc.value); got != tc.want {
-			t.Errorf("validVLANIDSpec(%q) = %v, want %v", tc.value, got, tc.want)
+		got, ok := parseVLANID(tc.value)
+		if ok != tc.ok || got != tc.want {
+			t.Errorf("parseVLANID(%q) = (%d, %v), want (%d, %v)", tc.value, got, ok, tc.want, tc.ok)
 		}
 	}
 }
@@ -229,28 +226,67 @@ func TestIPPoolFormValidate(t *testing.T) {
 	}
 }
 
-func TestBridgeVLANFormValidate(t *testing.T) {
-	valid := bridgeVLANForm{Bridge: "bridge1", VLANIDs: "100-120", Tagged: "ether2"}
+func TestVLANFormValidate(t *testing.T) {
+	valid := vlanForm{Name: "vlan100", Interface: "ether5", VLANID: "100"}
 	if !valid.validate() {
 		t.Fatalf("expected a valid vlan form, got errors: %#v", valid.Errors)
 	}
-
-	noBridge := bridgeVLANForm{VLANIDs: "100", Tagged: "ether2"}
-	if noBridge.validate() {
-		t.Fatal("vlan without a bridge should fail")
+	if got := valid.vlanIDValue(); got != 100 {
+		t.Errorf("vlanIDValue() = %d, want 100", got)
 	}
 
-	badIDs := bridgeVLANForm{Bridge: "bridge1", VLANIDs: "5000", Tagged: "ether2"}
-	if badIDs.validate() {
+	noName := vlanForm{Interface: "bridge1", VLANID: "100"}
+	if noName.validate() {
+		t.Fatal("vlan without a name should fail")
+	}
+	if noName.Errors["name"] == "" {
+		t.Error("missing name error")
+	}
+
+	noParent := vlanForm{Name: "vlan100", VLANID: "100"}
+	if noParent.validate() {
+		t.Fatal("vlan without a parent interface should fail")
+	}
+	if noParent.Errors["interface"] == "" {
+		t.Error("missing interface error")
+	}
+
+	// The parent may be a bridge or a physical port; both are just interface
+	// names, so a physical port has to pass exactly like a bridge does.
+	physical := vlanForm{Name: "vlan200", Interface: "sfp-sfpplus1", VLANID: "200"}
+	if !physical.validate() {
+		t.Fatalf("vlan on a physical port should be accepted, got errors: %#v", physical.Errors)
+	}
+
+	ranged := vlanForm{Name: "vlan100", Interface: "bridge1", VLANID: "100-120"}
+	if ranged.validate() {
+		t.Fatal("a VLAN range should fail")
+	}
+	if ranged.Errors["vlan_id"] == "" {
+		t.Error("missing vlan_id error")
+	}
+
+	badID := vlanForm{Name: "vlan5000", Interface: "bridge1", VLANID: "5000"}
+	if badID.validate() {
 		t.Fatal("vlan with id 5000 should fail")
 	}
-	if badIDs.Errors["vlan_ids"] == "" {
-		t.Error("missing vlan_ids error")
+	if badID.Errors["vlan_id"] == "" {
+		t.Error("missing vlan_id error")
 	}
 
-	noPorts := bridgeVLANForm{Bridge: "bridge1", VLANIDs: "100"}
-	if !noPorts.validate() {
-		t.Fatalf("vlan without ports should be accepted, got errors: %#v", noPorts.Errors)
+	badMTU := vlanForm{Name: "vlan100", Interface: "ether5", VLANID: "100", MTU: "12"}
+	if badMTU.validate() {
+		t.Fatal("vlan with an MTU below 68 should fail")
+	}
+	if badMTU.Errors["mtu"] == "" {
+		t.Error("missing mtu error")
+	}
+
+	// MTU and comment stay optional: the device default is the right answer for
+	// an operator who does not care.
+	optional := vlanForm{Name: "vlan100", Interface: "bridge1", VLANID: "100", Comment: "guest"}
+	if !optional.validate() {
+		t.Fatalf("vlan without an MTU should be accepted, got errors: %#v", optional.Errors)
 	}
 }
 
@@ -270,7 +306,7 @@ func TestNetworkTabsIncludePoolsAndVLANs(t *testing.T) {
 	if view.Count(tabPools) != 1 {
 		t.Errorf("pools count = %d, want 1", view.Count(tabPools))
 	}
-	view.VLANs = []BridgeVLAN{{ID: "*2"}}
+	view.VLANs = []InterfaceVLAN{{ID: "*2"}}
 	if view.Count(tabVLANs) != 1 {
 		t.Errorf("vlans count = %d, want 1", view.Count(tabVLANs))
 	}

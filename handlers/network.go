@@ -83,7 +83,7 @@ func (t networkTab) Hint() string {
 	case tabPools:
 		return "Address ranges from /ip/pool that the hotspot, DHCP and PPPoE servers lease out. Pools are created here; manage their members on the device."
 	case tabVLANs:
-		return "Bridge VLAN entries from /interface/bridge/vlan. One entry may carry a single VLAN ID or a range such as 100-120, tagged and untagged on the ports you pick."
+		return "VLAN interfaces from /interface/vlan. Each entry tags exactly one VLAN ID on one parent interface: a bridge such as bridge1, or any physical port such as ether5. Create one entry per VLAN."
 	default:
 		return "Hotspot servers from /ip/hotspot, each bound to one or more interfaces. The interface is mandatory when creating a server."
 	}
@@ -138,12 +138,11 @@ type networkPage struct {
 	WalledGarden   []WalledGardenEntry
 	WalledGardenIP []WalledGardenIPEntry
 	PoolRows       []IPPool
-	VLANs          []BridgeVLAN
+	VLANs          []InterfaceVLAN
 
 	// Option sources for the editor forms.
 	Interfaces         []InterfaceStats
 	Pools              []string
-	Bridges            []string
 	ServerNames        []string
 	ServerProfileNames []string
 	UserProfileNames   []string
@@ -174,7 +173,7 @@ type networkPage struct {
 	WalledGardenForm   *walledGardenForm
 	WalledGardenIPForm *walledGardenIPForm
 	PoolForm           *ipPoolForm
-	VLANForm           *bridgeVLANForm
+	VLANForm           *vlanForm
 }
 
 // newNetworkPage returns a page whose forms are all initialised, so the template
@@ -193,7 +192,7 @@ func (h *Handler) newNetworkPage(tab networkTab) *networkPage {
 		WalledGardenForm:   newWalledGardenForm(),
 		WalledGardenIPForm: newWalledGardenIPForm(),
 		PoolForm:           newIPPoolForm(),
-		VLANForm:           newBridgeVLANForm(),
+		VLANForm:           newVLANForm(),
 
 		LoginByMethods:        loginByMethods,
 		RadiusMACFormats:      radiusMACFormats,
@@ -1292,87 +1291,77 @@ func (f *ipPoolForm) validate() bool {
 }
 
 // ---------------------------------------------------------------------------
-// Bridge VLAN editor
+// VLAN interface editor
 // ---------------------------------------------------------------------------
 
-// bridgeVLANForm carries the /interface/bridge/vlan create editor values. Like
-// the pools, entries are added here and managed on the device afterwards.
-type bridgeVLANForm struct {
-	Bridge   string
-	VLANIDs  string
-	Tagged   string
-	Untagged string
-	Errors   map[string]string
+// vlanForm carries the /interface/vlan create editor values: one VLAN ID on one
+// parent interface. Like the pools, entries are added here and managed on the
+// device afterwards.
+type vlanForm struct {
+	Name      string
+	Interface string
+	VLANID    string
+	MTU       string
+	Comment   string
+	Errors    map[string]string
 }
 
-// newBridgeVLANForm returns an empty editor.
-func newBridgeVLANForm() *bridgeVLANForm {
-	return &bridgeVLANForm{Errors: map[string]string{}}
+// newVLANForm returns an empty editor.
+func newVLANForm() *vlanForm {
+	return &vlanForm{Errors: map[string]string{}}
 }
 
-// bridgeVLANFormFromRequest reads the submitted editor.
-func bridgeVLANFormFromRequest(r *http.Request) *bridgeVLANForm {
-	return &bridgeVLANForm{
-		Bridge:   strings.TrimSpace(r.PostFormValue("bridge")),
-		VLANIDs:  strings.TrimSpace(r.PostFormValue("vlan_ids")),
-		Tagged:   strings.TrimSpace(r.PostFormValue("tagged")),
-		Untagged: strings.TrimSpace(r.PostFormValue("untagged")),
-		Errors:   map[string]string{},
+// vlanFormFromRequest reads the submitted editor.
+func vlanFormFromRequest(r *http.Request) *vlanForm {
+	return &vlanForm{
+		Name:      strings.TrimSpace(r.PostFormValue("name")),
+		Interface: strings.TrimSpace(r.PostFormValue("interface")),
+		VLANID:    strings.TrimSpace(r.PostFormValue("vlan_id")),
+		MTU:       strings.TrimSpace(r.PostFormValue("mtu")),
+		Comment:   strings.TrimSpace(r.PostFormValue("comment")),
+		Errors:    map[string]string{},
 	}
 }
 
-// validate checks the create editor: a bridge owns the entry and the VLAN IDs
-// decide what the entry is. Tagged and untagged ports are optional; AddBridgeVLAN
-// omits either property when it is blank.
-func (f *bridgeVLANForm) validate() bool {
+// validate checks the create editor: the parent interface owns the new VLAN
+// interface and exactly one VLAN ID is tagged on it. A range never passes,
+// because one form submission creates one VLAN interface, and a second VLAN is a
+// second entry on whatever parent the operator picks.
+func (f *vlanForm) validate() bool {
 	if f.Errors == nil {
 		f.Errors = map[string]string{}
 	}
-	if f.Bridge == "" {
-		f.Errors["bridge"] = "Pick the bridge that owns this VLAN entry."
-	} else if tooLong(f.Bridge) {
-		f.Errors["bridge"] = "Keep the bridge name under 200 characters."
+	if f.Name == "" {
+		f.Errors["name"] = "Give the VLAN interface a name, such as vlan100."
+	} else if tooLong(f.Name) {
+		f.Errors["name"] = "Keep the interface name under 200 characters."
 	}
-	if f.VLANIDs == "" {
-		f.Errors["vlan_ids"] = "Enter a VLAN ID (100) or a range (100-120)."
-	} else if !validVLANIDSpec(f.VLANIDs) {
-		f.Errors["vlan_ids"] = "Use VLAN IDs from 1 to 4094, as 100, or as ranges like 100-120."
+	if f.Interface == "" {
+		f.Errors["interface"] = "Pick the parent interface: a bridge (bridge1) or a physical port (ether5)."
+	} else if tooLong(f.Interface) {
+		f.Errors["interface"] = "Keep the interface name under 200 characters."
 	}
-	if tooLong(f.Tagged) {
-		f.Errors["tagged"] = "Keep the tagged port list under 200 characters."
+	if f.VLANID == "" {
+		f.Errors["vlan_id"] = "Enter one VLAN ID from 1 to 4094, for example 100."
+	} else if _, ok := parseVLANID(f.VLANID); !ok {
+		f.Errors["vlan_id"] = "Use a single VLAN ID from 1 to 4094. Ranges such as 100-120 are not accepted: create one VLAN at a time."
 	}
-	if tooLong(f.Untagged) {
-		f.Errors["untagged"] = "Keep the untagged port list under 200 characters."
+	if f.MTU != "" {
+		if mtu, err := strconv.Atoi(f.MTU); err != nil || mtu < 68 || mtu > 65535 {
+			f.Errors["mtu"] = "Use an MTU from 68 to 65535, or leave it blank for the device default."
+		}
+	}
+	if tooLong(f.Comment) {
+		f.Errors["comment"] = "Keep the comment under 200 characters."
 	}
 	return len(f.Errors) == 0
 }
 
-// validVLANIDSpec validates a RouterOS vlan-ids value: a comma separated list
-// of single IDs or ranges, every ID between 1 and 4094 and every range rising.
-func validVLANIDSpec(value string) bool {
-	if strings.TrimSpace(value) == "" {
-		return false
-	}
-	for _, item := range splitROSList(value) {
-		if !validVLANIDItem(item) {
-			return false
-		}
-	}
-	return true
-}
-
-// validVLANIDItem validates one "100" or "100-120" entry.
-func validVLANIDItem(value string) bool {
-	lowRaw, highRaw, ranged := strings.Cut(value, "-")
-	low, ok := parseVLANID(lowRaw)
-	if !ok {
-		return false
-	}
-	if !ranged {
-		return true
-	}
-	high, ok := parseVLANID(highRaw)
-	return ok && high >= low
+// vlanIDValue is the VLAN ID the editor validated, ready for the device. Call it
+// after validate, which is what guarantees the value is a single 1-4094 ID.
+func (f *vlanForm) vlanIDValue() int {
+	id, _ := parseVLANID(f.VLANID)
+	return id
 }
 
 // parseVLANID reads one VLAN ID, accepting only the 1-4094 IEEE range.
@@ -1537,16 +1526,10 @@ func (h *Handler) loadNetwork(ctx context.Context, view *networkPage) {
 		view.PoolRows = pools
 	}
 
-	if vlans, err := client.BridgeVLANs(callCtx); err != nil {
-		view.Warnings = append(view.Warnings, "Bridge VLAN table unavailable: "+routerErrorHint(err))
+	if vlans, err := client.InterfaceVLANs(callCtx); err != nil {
+		view.Warnings = append(view.Warnings, "VLAN interfaces unavailable: "+routerErrorHint(err))
 	} else {
 		view.VLANs = vlans
-	}
-
-	if bridges, err := client.Bridges(callCtx); err != nil {
-		view.Warnings = append(view.Warnings, "Bridge list unavailable: "+routerErrorHint(err))
-	} else {
-		view.Bridges = bridges
 	}
 }
 
@@ -2246,13 +2229,14 @@ func (h *Handler) IPPoolCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
-// Bridge VLANs
+// VLAN interfaces
 // ---------------------------------------------------------------------------
 
-// BridgeVLANCreate adds one VLAN or a VLAN-ID range to a bridge's VLAN table.
-// Like the pools, entries are created here and removed on the device.
-func (h *Handler) BridgeVLANCreate(w http.ResponseWriter, r *http.Request) {
-	form := bridgeVLANFormFromRequest(r)
+// VLANCreate adds one VLAN interface to a device: a single VLAN ID tagged on the
+// parent interface the operator picked, a bridge or a physical port. Like the
+// pools, entries are created here and removed on the device.
+func (h *Handler) VLANCreate(w http.ResponseWriter, r *http.Request) {
+	form := vlanFormFromRequest(r)
 	if !form.validate() {
 		view := h.newNetworkPage(tabVLANs)
 		view.VLANForm = form
@@ -2269,13 +2253,13 @@ func (h *Handler) BridgeVLANCreate(w http.ResponseWriter, r *http.Request) {
 	callCtx, cancel := context.WithTimeout(r.Context(), h.cfg.APITimeout)
 	defer cancel()
 
-	if _, err := client.AddBridgeVLAN(callCtx, form.Bridge, form.VLANIDs, form.Tagged, form.Untagged); err != nil {
+	if _, err := client.AddInterfaceVLAN(callCtx, form.Name, form.Interface, form.vlanIDValue(), form.MTU, form.Comment); err != nil {
 		h.flashErr(w, r, networkPath(router.ID, tabVLANs),
-			"Creating the bridge VLAN entry failed", err)
+			"Creating the VLAN interface failed", err)
 		return
 	}
 	h.flashAndRedirect(w, r, networkPath(router.ID, tabVLANs), "ok",
-		"VLAN "+form.VLANIDs+" created on "+router.Name+" ("+form.Bridge+")")
+		"VLAN interface "+form.Name+" (VLAN "+form.VLANID+" on "+form.Interface+") created on "+router.Name)
 }
 
 // ---------------------------------------------------------------------------

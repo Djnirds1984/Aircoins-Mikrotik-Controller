@@ -979,64 +979,72 @@
 {{else if eq .Tab "vlans"}}
   <section class="card">
     <h2>VLANs <span class="badge slate">{{len .VLANs}}</span></h2>
-    <p class="hint">/interface/bridge/vlan — which ports carry which VLANs on each bridge. One entry may hold a single ID or a whole range such as 100-120.</p>
+    <p class="hint">/interface/vlan — every entry is one VLAN interface: a single VLAN ID on a parent interface, a bridge such as bridge1 or a physical port such as ether5. Create one entry per VLAN.</p>
     {{if .VLANs}}
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Bridge</th><th>VLAN IDs</th><th>Tagged</th><th>Untagged</th><th>Active on</th><th>State</th></tr>
+          <tr><th>Name</th><th>Parent interface</th><th>VLAN ID</th><th class="num">MTU</th><th>State</th><th>Comment</th></tr>
         </thead>
         <tbody>
         {{range .VLANs}}
           <tr>
-            <td><strong>{{.Bridge}}</strong></td>
-            <td class="mono">{{.VLANIDs}}</td>
-            <td>{{if .Tagged}}<span class="badge slate">{{.Tagged}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
-            <td>{{if .Untagged}}<span class="badge slate">{{.Untagged}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
-            <td class="mono" style="font-size:.8rem">{{default .Current "—"}}</td>
-            <td>{{if .Disabled}}<span class="badge slate">disabled</span>{{else}}<span class="badge green">enabled</span>{{end}}</td>
+            <td class="mono"><strong>{{.Name}}</strong></td>
+            <td><span class="badge slate">{{.Interface}}</span></td>
+            <td class="mono">{{.VLANID}}</td>
+            <td class="num">{{default .MTU "auto"}}</td>
+            <td>
+              {{if .Disabled}}<span class="badge slate">disabled</span>
+              {{else if .Running}}<span class="badge green">running</span>
+              {{else}}<span class="badge blue">enabled</span>{{end}}
+            </td>
+            <td>{{if .Comment}}{{.Comment}}{{else}}<span class="muted">—</span>{{end}}</td>
           </tr>
         {{end}}
         </tbody>
       </table>
     </div>
     {{else}}
-    <div class="empty">No bridge VLAN entry on this device yet.</div>
+    <div class="empty">No VLAN interface on this device yet.</div>
     {{end}}
   </section>
   <section class="card" style="margin-top:16px">
     {{$form := .VLANForm}}
-    <details class="editor" open>
-      <summary>Add a VLAN</summary>
+    <details class="editor"{{if $form.Errors}} open{{end}}>
+      <summary>Add a VLAN interface</summary>
       <form method="post" action="/network/{{$.Router.ID}}/vlans">
         {{template "csrf" $}}
         <div class="form-grid">
           <div class="field">
-            <label for="vlan-bridge">Bridge</label>
-            <select id="vlan-bridge" name="bridge">
-              <option value=""{{if eq $form.Bridge ""}} selected{{end}}>(pick a bridge)</option>
-              {{range $.Bridges}}<option value="{{.}}"{{if eq . $form.Bridge}} selected{{end}}>{{.}}</option>{{end}}
-            </select>
-            {{with $form.Errors.bridge}}<span class="error">{{.}}</span>{{end}}
+            <label for="vlan-name">Name</label>
+            <input id="vlan-name" name="name" value="{{$form.Name}}" maxlength="200" placeholder="vlan100" required>
+            {{with $form.Errors.name}}<span class="error">{{.}}</span>{{end}}
           </div>
           <div class="field">
-            <label for="vlan-ids">VLAN IDs</label>
-            <input id="vlan-ids" name="vlan_ids" value="{{$form.VLANIDs}}" placeholder="100 or 100-120">
-            {{with $form.Errors.vlan_ids}}<span class="error">{{.}}</span>{{end}}
+            <label for="vlan-interface">Parent interface</label>
+            <input id="vlan-interface" name="interface" value="{{$form.Interface}}" list="iface-options" placeholder="bridge1 or ether5" required>
+            <small>A bridge (bridge1) or any physical port (ether5).</small>
+            {{with $form.Errors.interface}}<span class="error">{{.}}</span>{{end}}
           </div>
           <div class="field">
-            <label for="vlan-tagged">Tagged ports</label>
-            <input id="vlan-tagged" name="tagged" value="{{$form.Tagged}}" list="iface-options" placeholder="ether2, sfp-sfpplus1 (optional)">
-            {{with $form.Errors.tagged}}<span class="error">{{.}}</span>{{end}}
+            <label for="vlan-id">VLAN ID</label>
+            <input id="vlan-id" name="vlan_id" type="number" min="1" max="4094" step="1" value="{{$form.VLANID}}" placeholder="100" required>
+            <small>One ID per interface — a second VLAN is a second entry.</small>
+            {{with $form.Errors.vlan_id}}<span class="error">{{.}}</span>{{end}}
           </div>
           <div class="field">
-            <label for="vlan-untagged">Untagged ports</label>
-            <input id="vlan-untagged" name="untagged" value="{{$form.Untagged}}" list="iface-options" placeholder="ether3 (optional)">
-            {{with $form.Errors.untagged}}<span class="error">{{.}}</span>{{end}}
+            <label for="vlan-mtu">MTU</label>
+            <input id="vlan-mtu" name="mtu" value="{{$form.MTU}}" placeholder="(device default)">
+            {{with $form.Errors.mtu}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="vlan-comment">Comment</label>
+            <input id="vlan-comment" name="comment" value="{{$form.Comment}}" maxlength="200">
+            {{with $form.Errors.comment}}<span class="error">{{.}}</span>{{end}}
           </div>
         </div>
         <div class="btn-row" style="margin-top:12px">
-          <button class="btn primary" type="submit">Create VLAN</button>
+          <button class="btn primary" type="submit">Create VLAN interface</button>
         </div>
       </form>
     </details>

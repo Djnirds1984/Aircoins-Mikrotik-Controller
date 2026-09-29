@@ -378,11 +378,10 @@ func TestNetworkTemplateRenders(t *testing.T) {
 				ID: "*7", Name: "hotspot_pool", Ranges: "10.5.50.10-10.5.50.200",
 				NextPool: "", Comment: "guest leases",
 			}}
-			view.VLANs = []BridgeVLAN{{
-				ID: "*8", Bridge: "bridge1", VLANIDs: "100-120",
-				Tagged: "ether2", Untagged: "ether3", Current: "ether2",
+			view.VLANs = []InterfaceVLAN{{
+				ID: "*8", Name: "vlan100", Interface: "bridge1", VLANID: "100",
+				MTU: "1500", Comment: "guest", Running: true,
 			}}
-			view.Bridges = []string{"bridge1"}
 			view.ServerNames = []string{"hotspot1"}
 			view.ServerProfileNames = []string{"hsprof1"}
 			view.UserProfileNames = []string{"default"}

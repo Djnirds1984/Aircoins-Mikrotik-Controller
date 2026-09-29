@@ -149,8 +149,8 @@ func (h *Handler) Routes() http.Handler {
 	// IP pools (/ip/pool) - create only.
 	mux.HandleFunc("POST /network/{id}/pools", h.IPPoolCreate)
 
-	// Bridge VLANs (/interface/bridge/vlan) - create only.
-	mux.HandleFunc("POST /network/{id}/vlans", h.BridgeVLANCreate)
+	// VLAN interfaces (/interface/vlan) - create only.
+	mux.HandleFunc("POST /network/{id}/vlans", h.VLANCreate)
 
 	// Session history.
 	mux.HandleFunc("GET /sessions", h.SessionsList)
