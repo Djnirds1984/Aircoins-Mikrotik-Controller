@@ -466,10 +466,30 @@ if [[ "$HOST_PART" == "0.0.0.0" || -z "$HOST_PART" ]]; then HOST_PART="127.0.0.1
 # Browsers already default to port 80, so it is left out of the printed URLs.
 URL_HOST="$HOST_PART"
 (( LISTEN_PORT == 80 )) || URL_HOST="${HOST_PART}:${LISTEN_PORT}"
-if curl -fsS --max-time 10 "http://${URL_HOST}/healthz" | grep -q ok; then
-  log "Health check OK: http://${URL_HOST}/healthz"
+# Mirror the controller's default so the printed URLs are right. A custom
+# ADMIN_PATH in the env file is honoured as well.
+ADMIN_PATH="$(sed -n 's/^[[:space:]]*ADMIN_PATH[[:space:]]*=[[:space:]]*//p' "$ENV_FILE" 2>/dev/null | tail -n1)"
+ADMIN_PATH="${ADMIN_PATH:-/admin}"
+ADMIN_PATH="/${ADMIN_PATH#/}"; ADMIN_PATH="${ADMIN_PATH%/}"
+# Wait for the service to actually answer before probing it. A single curl
+# right after `systemctl restart` races the process: the controller applies
+# pending migrations and (on first boot) derives a PBKDF2 password hash before
+# it binds the port, which on a low-power board (Orange Pi) takes long enough
+# that the first probe gets "connection refused" even though the service is
+# perfectly healthy. Retry for up to 30s before calling it a failure.
+HEALTH_URL="http://${URL_HOST}/healthz"
+health_ok=0
+for _ in $(seq 1 30); do
+  if curl -fsS --max-time 5 "$HEALTH_URL" 2>/dev/null | grep -q ok; then
+    health_ok=1
+    break
+  fi
+  sleep 1
+done
+if (( health_ok )); then
+  log "Health check OK: $HEALTH_URL"
 else
-  warn "Health check failed on http://${URL_HOST}/healthz; recent logs:"
+  warn "Health check failed on $HEALTH_URL; recent logs:"
   journalctl -u "$SERVICE_NAME" --no-pager -n 30 2>/dev/null || true
   die "Service unhealthy. Inspect: journalctl -u $SERVICE_NAME -e"
 fi
@@ -477,16 +497,45 @@ fi
 cat <<EOF
 
 ==================== Aircoins installed ====================
-Dashboard : http://${URL_HOST}/
-Portal    : http://${URL_HOST}/portal/login
-Health    : http://${URL_HOST}/healthz
-Binary    : $INSTALL_DIR/$APP_NAME ($INSTALLED_VERSION)
-Data      : $DATA_DIR/aircoins.db (+ secret.key)
-Config    : $ENV_FILE
-Service   : systemctl status $SERVICE_NAME
-Logs      : journalctl -u $SERVICE_NAME -f
-Board     : $BOARD ($ARCH_LABEL, ${MEM_MB} MB RAM)
+Portal (guests) : http://${URL_HOST}/
+Panel (admin)   : http://${URL_HOST}${ADMIN_PATH}/
+Health          : $HEALTH_URL
+Binary          : $INSTALL_DIR/$APP_NAME ($INSTALLED_VERSION)
+Data            : $DATA_DIR/aircoins.db (+ secret.key)
+Config          : $ENV_FILE
+Service         : systemctl status $SERVICE_NAME
+Logs            : journalctl -u $SERVICE_NAME -f
+Board           : $BOARD ($ARCH_LABEL, ${MEM_MB} MB RAM)
 ============================================================
-Next: register routers under /routers, then point your MikroTik
-hotspot login page at the portal URL (see INSTALLATION.md).
+EOF
+
+# The panel needs credentials. On a fresh install the controller generated a
+# random password and logged it once, so print it here instead of leaving the
+# operator to grep the journal. ADMIN_USER/ADMIN_PASSWORD are only seeds for a
+# brand new account and are ignored once one exists.
+ADMIN_NAME="$(sed -n 's/^[[:space:]]*ADMIN_USER[[:space:]]*=[[:space:]]*//p' "$ENV_FILE" 2>/dev/null | tail -n1)"
+ADMIN_NAME="${ADMIN_NAME:-admin}"
+GENERATED_PW="$(journalctl -u "$SERVICE_NAME" --no-pager -n 200 2>/dev/null \
+  | sed -n 's/.*generated an initial panel password.*password=\([^ ]*\).*/\1/p' | tail -n1)"
+if [[ -n "$GENERATED_PW" ]]; then
+  cat <<EOF
+
+Operator sign-in (generated on first boot):
+    user     : $ADMIN_NAME
+    password : $GENERATED_PW
+Change it in the panel under Settings. It is shown here once;
+afterwards only its hash is stored.
+EOF
+else
+  cat <<EOF
+
+The panel requires a sign-in. To see the generated password:
+    journalctl -u $SERVICE_NAME | grep 'initial panel password'
+EOF
+fi
+
+cat <<EOF
+Next: sign in, then register routers under ${ADMIN_PATH}/routers and
+point your MikroTik hotspot login page at the portal URL
+(see INSTALLATION.md).
 EOF
