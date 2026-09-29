@@ -3,13 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{.Title}} · {{.PortalName}}</title>
+<title>{{.Title}} · {{default .Branding.HeaderName .PortalName}}</title>
 {{template "styles" .}}
+<style>{{.Branding.ThemeCSS}}</style>
 </head>
-<body class="portal">
+<body class="portal"{{if .Branding.BackgroundURL}} style="background-image:linear-gradient(var(--bg-scrim),var(--bg-scrim)),url('{{.Branding.BackgroundURL}}');background-size:cover;background-position:center"{{end}}>
 <main class="portal-wrap">
   <div class="portal-card">
-    <div class="brand"><span class="mark">A</span><span>{{.PortalName}}</span></div>
+    <div class="brand"><span class="mark">A</span><span>{{.Branding.HeaderName}}</span></div>
     <h1>{{if .Success}}You are online{{else}}Hotspot sign in{{end}}</h1>
     {{if .RouterKnown}}
       <p class="sub">Connected via <strong>{{.RouterName}}</strong></p>
@@ -73,6 +74,10 @@
         {{if .Portal.MAC}}Device <span class="mono">{{.Portal.MAC}}</span>{{end}}
         {{if .Portal.IP}} · <span class="mono">{{.Portal.IP}}</span>{{end}}
       </p>
+    {{end}}
+
+    {{if .Branding.CustomHTML}}
+      <div class="portal-extra" style="margin-top:16px">{{.Branding.CustomHTML}}</div>
     {{end}}
   </div>
   <p class="portal-foot">{{.PortalName}} · ask the front desk if a code does not work</p>

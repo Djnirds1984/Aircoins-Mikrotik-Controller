@@ -275,6 +275,17 @@ func (h *Handler) adminRoutes() *http.ServeMux {
 	mux.HandleFunc("POST /portal/login", h.PortalAuthenticate)
 	mux.HandleFunc("GET /portal/status", h.PortalStatus)
 
+	// The stored portal background photo. Public, because the guest facing
+	// pages fetch it before anyone has signed in.
+	mux.HandleFunc("GET "+portalBackgroundPath, h.PortalBackground)
+
+	// PORTAL editor: the theme, header name, extra HTML and background image
+	// shown to guests on the captive pages.
+	mux.HandleFunc("GET "+portalEditorPath, h.PortalEditor)
+	mux.HandleFunc("POST "+portalEditorSavePath, h.PortalEditorSave)
+	mux.HandleFunc("POST "+portalEditorBackgroundPath, h.PortalEditorBackground)
+	mux.HandleFunc("POST "+portalEditorBackgroundDrop, h.PortalEditorBackgroundDelete)
+
 	// REST API (RouterOS v7+ compatible).
 	h.RoutesAPI(mux)
 	return mux
@@ -345,7 +356,15 @@ func (h *Handler) logRequests(next http.Handler) http.Handler {
 // dropdown then stays disabled forever, in every browser.
 func (h *Handler) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		// The background upload is the one endpoint that legitimately needs
+		// more than 1 MB, so it gets a budget sized to the store's own limit
+		// (plus multipart framing). Everything else keeps the tight cap that
+		// stops a runaway POST from filling the server's memory.
+		limit := int64(1 << 20)
+		if h.trimAdminPath(r.URL.Path) == portalEditorBackgroundPath {
+			limit = database.MaxPortalBackgroundBytes + (1 << 20)
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
 		head := w.Header()
 		head.Set("X-Content-Type-Options", "nosniff")
 		head.Set("X-Frame-Options", "DENY")
@@ -354,6 +373,25 @@ func (h *Handler) securityHeaders(next http.Handler) http.Handler {
 			"default-src 'none'; script-src 'self' 'unsafe-inline'; connect-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// parseRequestForm populates r.Form for the CSRF check.
+//
+// ParseForm alone is not enough: for a multipart/form-data POST (the portal
+// background upload) it leaves PostForm empty, so the submitted csrf_token
+// would read as "" and every image upload would be rejected with 403. The
+// multipart parser copies the ordinary fields into PostForm too, so the token
+// is then read exactly as it is for a urlencoded form.
+func (h *Handler) parseRequestForm(r *http.Request) error {
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		// A small in-memory budget: the only multipart form is the upload, and
+		// its file part is read with an explicit limit in the handler.
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			return err
+		}
+		return nil
+	}
+	return r.ParseForm()
 }
 
 // csrfGuard enforces the double submit cookie on state changing admin routes.
@@ -376,7 +414,7 @@ func (h *Handler) csrfGuard(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if err := r.ParseForm(); err != nil {
+		if err := h.parseRequestForm(r); err != nil {
 			http.Error(w, "cannot read form", http.StatusBadRequest)
 			return
 		}

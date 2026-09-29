@@ -75,6 +75,9 @@ type portalPage struct {
 	RedirectTo   string
 	FallbackLink string
 	ShowPassword bool
+	// Branding is the operator's theme, header name, background and extra HTML,
+	// resolved from the PORTAL editor.
+	Branding portalBranding
 }
 
 // PortalLogin serves the captive portal login page. MikroTik redirects the
@@ -84,8 +87,9 @@ func (h *Handler) PortalLogin(w http.ResponseWriter, r *http.Request) {
 	request := portalRequestFromValues(r.URL.Query())
 
 	view := &portalPage{
-		page:   page{Title: "Sign in", Nav: ""},
-		Portal: request,
+		page:     page{Title: "Sign in", Nav: ""},
+		Portal:   request,
+		Branding: h.portalBrandingFor(ctx),
 	}
 
 	// A hotspot reports a failed attempt by redirecting back with ?error=...

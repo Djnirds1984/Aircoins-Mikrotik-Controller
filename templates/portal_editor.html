@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · {{.PortalName}}</title>
+<meta name="robots" content="noindex, nofollow">
+{{template "styles" .}}
+</head>
+<body>
+{{template "nav" .}}
+<main class="wrap">
+  {{template "flash" .}}
+
+  <div class="page-head">
+    <div>
+      <h1>Portal</h1>
+      <p class="sub">How the captive portal looks to your guests. Changes apply on their next page load.</p>
+    </div>
+    <div class="actions">
+      <a class="btn" href="/portal/login" target="_blank" rel="noopener">Preview sign-in page</a>
+    </div>
+  </div>
+
+  <form method="post" action="{{.AdminPath}}/portal-editor/save">
+    {{template "csrf" .}}
+
+    <section class="card">
+      <h2>Theme</h2>
+      <p class="hint">Pick the colours of the sign-in page your guests see.</p>
+      {{with .Form.Errors.theme}}<div class="alert err">{{.}}</div>{{end}}
+      <div class="theme-grid">
+        {{range .Themes}}
+        <label class="theme-card">
+          <input type="radio" name="theme" value="{{.Key}}"{{if eq $.Form.Theme .Key}} checked{{end}}>
+          <span class="swatch" style="background-image:{{.Swatch}}"></span>
+          <span class="meta">
+            <span class="name">{{.Label}}</span>
+            <span class="desc">{{.Description}}</span>
+          </span>
+        </label>
+        {{end}}
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:16px">
+      <h2>Header name</h2>
+      <p class="hint">The name shown at the top of the captive portal, instead of {{.PortalName}}.</p>
+      <div class="field">
+        <label for="header_name">Name</label>
+        <input id="header_name" name="header_name" value="{{.Form.HeaderName}}" maxlength="120"
+          placeholder="{{.PortalName}}" autocomplete="off">
+        {{with .Form.Errors.header_name}}<span class="error">{{.}}</span>{{end}}
+        <span class="muted" style="font-size:.78rem">Leave it empty to keep using the PORTAL_NAME from the environment.</span>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:16px">
+      <h2>Custom HTML</h2>
+      <p class="hint">
+        Extra markup rendered inside the sign-in card — a terms box, opening hours,
+        a contact number, a QR code. Styles from this page apply, so
+        <code>class="hint"</code> and <code>class="btn"</code> work as they do here.
+      </p>
+      <div class="field">
+        <label for="custom_html">HTML</label>
+        <textarea id="custom_html" name="custom_html" class="code-area" rows="10" spellcheck="false"
+          placeholder="&lt;p class=&quot;hint&quot;&gt;Open daily 08:00 - 22:00&lt;/p&gt;">{{.Form.CustomHTML}}</textarea>
+        {{with .Form.Errors.custom_html}}<span class="error">{{.}}</span>{{end}}
+        <span class="muted" style="font-size:.78rem">
+          Scripts, iframes and javascript: links are rejected: the portal is served with a
+          script-free policy, and a walled-garden guest cannot load remote assets.
+        </span>
+      </div>
+    </section>
+
+    <div class="btn-row" style="margin-top:16px">
+      <button class="btn primary" type="submit">Save appearance</button>
+      <a class="btn" href="{{.AdminPath}}/portal-editor">Discard changes</a>
+    </div>
+  </form>
+
+  <section class="card" style="margin-top:16px">
+    <h2>Background image</h2>
+    <p class="hint">
+      A JPEG or PNG shown behind the sign-in card, dimmed so the text stays readable.
+      Up to {{.Defaults.MaxImageBytes}} bytes.
+    </p>
+
+    {{with .Form.Errors.background}}<div class="alert err">{{.}}</div>{{end}}
+
+    {{if .HasBackground}}
+      <img class="bg-thumb" src="/portal/background" alt="Current portal background">
+      <dl class="kv">
+        <dt>File</dt><dd>{{default .Settings.BackgroundName "unnamed"}}</dd>
+        <dt>Format</dt><dd class="mono">{{.Settings.BackgroundType}}</dd>
+        <dt>Uploaded</dt><dd>{{timeLabel .BackgroundUpdatedAt}}</dd>
+      </dl>
+      <form class="inline-form" method="post" action="{{.AdminPath}}/portal-editor/background/delete" style="margin-top:12px">
+        {{template "csrf" .}}
+        <button class="btn danger" type="submit">Remove background</button>
+      </form>
+    {{else}}
+      <div class="empty">No background image. The portal uses the plain theme background.</div>
+    {{end}}
+
+    <form method="post" action="{{.AdminPath}}/portal-editor/background" enctype="multipart/form-data" style="margin-top:14px">
+      {{template "csrf" .}}
+      <div class="field">
+        <label for="background">Upload a new image</label>
+        <input id="background" name="background" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" required>
+        <span class="muted" style="font-size:.78rem">
+          .jpg, .jpeg or .png. The file type is checked from the image data itself, not the
+          name, and a landscape photo around 1600&nbsp;px wide is plenty.
+        </span>
+      </div>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn primary" type="submit">Upload background</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <h2>How this reaches your guests</h2>
+    <ul class="hint" style="padding-left:18px">
+      <li>The sign-in page is served at <code>/portal/login</code>; the MikroTik hotspot
+        redirects clients there with the login parameters.</li>
+      <li>The welcome page at <code>/</code> uses the same theme and background.</li>
+      <li>The image is served from <code>/portal/background</code>, which guests can fetch
+        before signing in — it is the one admin-editable asset on a public path.</li>
+      {{if .UpdatedAt}}<li>Appearance last saved {{timeLabel .UpdatedAt}}.</li>{{end}}
+    </ul>
+  </section>
+</main>
+{{template "footer" .}}
+</body>
+</html>

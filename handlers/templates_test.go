@@ -20,6 +20,7 @@ var templateNames = []string{
 	"captive.html",
 	"login.html",
 	"settings.html",
+	"portal_editor.html",
 	"error.html",
 }
 

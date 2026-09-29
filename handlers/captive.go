@@ -34,6 +34,9 @@ type captivePage struct {
 	Support string
 	// AdminPath is where the panel lives, so the page can link to it.
 	AdminPath string
+	// Branding is the operator's theme, header name, background and extra HTML,
+	// resolved from the PORTAL editor.
+	Branding portalBranding
 }
 
 // PortalIndex serves the captive portal welcome page at the root of the
@@ -60,6 +63,7 @@ func (h *Handler) PortalIndex(w http.ResponseWriter, r *http.Request) {
 		Support:   h.cfg.PortalSupport,
 		AdminPath: h.cfg.AdminPath,
 		LoginURL:  "/portal/login",
+		Branding:  h.portalBrandingFor(ctx),
 	}
 
 	// The router is only used to brand the page; an unresolvable one must not

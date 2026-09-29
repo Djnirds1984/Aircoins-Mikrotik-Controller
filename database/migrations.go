@@ -164,6 +164,13 @@ var migrations = []migration{
 			adminSessionsIndexesDDL,
 		},
 	},
+	{
+		version: 4,
+		name:    "portal-appearance",
+		statements: []string{
+			portalSettingsDDL,
+		},
+	},
 }
 
 // migrate applies every pending migration inside its own transaction.

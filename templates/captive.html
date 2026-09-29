@@ -3,14 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{.PortalName}}</title>
+<title>{{default .Branding.HeaderName .PortalName}}</title>
 <meta name="robots" content="noindex, nofollow">
 {{template "styles" .}}
+<style>{{.Branding.ThemeCSS}}</style>
 </head>
-<body class="portal">
+<body class="portal"{{if .Branding.BackgroundURL}} style="background-image:linear-gradient(var(--bg-scrim),var(--bg-scrim)),url('{{.Branding.BackgroundURL}}');background-size:cover;background-position:center"{{end}}>
 <main class="portal-wrap portal-wide">
   <div class="portal-card">
-    <div class="brand"><span class="mark">A</span><span>{{.PortalName}}</span></div>
+    <div class="brand"><span class="mark">A</span><span>{{.Branding.HeaderName}}</span></div>
 
     {{if .Online}}
       <h1>You are online</h1>
@@ -47,6 +48,9 @@
       <p class="hint" style="margin-top:16px">{{.Support}}</p>
       {{if .RouterKnown}}
         <p class="hint">Network: <strong>{{.RouterName}}</strong></p>
+      {{end}}
+      {{if .Branding.CustomHTML}}
+        <div class="portal-extra" style="margin-top:16px">{{.Branding.CustomHTML}}</div>
       {{end}}
     {{end}}
   </div>

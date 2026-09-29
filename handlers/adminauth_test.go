@@ -21,7 +21,7 @@ func TestAdminPanelRequiresASession(t *testing.T) {
 
 	guarded := []string{
 		"/admin/", "/admin/routers", "/admin/vouchers", "/admin/sessions",
-		"/admin/settings", "/routers", "/vouchers", "/api/v1/routers",
+		"/admin/settings", "/admin/portal-editor", "/routers", "/vouchers", "/api/v1/routers",
 	}
 	for _, path := range guarded {
 		resp, err := noRedirect().Get(base + path)

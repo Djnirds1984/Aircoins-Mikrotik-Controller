@@ -241,6 +241,24 @@ func TestPageTemplatesRender(t *testing.T) {
 		RouterKnown: true,
 		FormError:   "That voucher code is not valid.",
 		Notice:      "Ask the front desk for a code.",
+		Branding:    sampleBranding(),
+	}
+	// The same page without any operator branding, which is what a fresh
+	// install serves: the header must still fall back to the portal name
+	// rather than rendering blank.
+	plainPortal := &portalPage{
+		page:   samplePage("Hotspot sign in", ""),
+		Portal: portalRequest{MAC: "AA:BB:CC:DD:EE:FF", IP: "10.5.50.42"},
+	}
+	// The welcome page a guest sees at the root of the controller.
+	captive := &captivePage{
+		page:        samplePage("Wi-Fi sign in", ""),
+		RouterName:  "OrangePi-Lab",
+		RouterKnown: true,
+		Tagline:     "Connect to the Wi-Fi to get online",
+		Support:     "Ask the front desk for a voucher code.",
+		LoginURL:    "/portal/login",
+		Branding:    sampleBranding(),
 	}
 	hotspotVoucher := sampleVoucher(database.VoucherActive)
 	onlinePortal := &portalPage{
@@ -300,7 +318,12 @@ func TestPageTemplatesRender(t *testing.T) {
 			NextURL: "/vouchers?page=2",
 		}},
 		{"portal login", "portal.html", loginPortal},
+		{"portal login unbranded", "portal.html", plainPortal},
 		{"portal success", "portal.html", onlinePortal},
+		{"captive welcome", "captive.html", captive},
+		{"portal editor", "portal_editor.html", samplePortalEditor()},
+		{"portal editor with background", "portal_editor.html", samplePortalEditorWithBackground()},
+		{"portal editor errors", "portal_editor.html", invalidPortalEditor()},
 		{"error", "error.html", &errorPage{
 			page:    samplePage("Router not found", ""),
 			Message: "That router is not in the inventory any more.",
@@ -312,6 +335,61 @@ func TestPageTemplatesRender(t *testing.T) {
 			renderPage(t, tc.tmpl, tc.data)
 		})
 	}
+}
+
+// sampleBranding is a fully configured portal appearance, so the render suite
+// exercises the theme, background and custom HTML branches of the guest pages.
+func sampleBranding() portalBranding {
+	theme := portalThemeByKey(database.PortalThemeSunset)
+	return portalBranding{
+		HeaderName:    "Tolosa Coffee Wi-Fi",
+		ThemeCSS:      theme.CSS,
+		Theme:         theme.Key,
+		BackgroundURL: portalBackgroundPath,
+		CustomHTML:    template.HTML(`<p class="hint">Open daily 08:00 - 22:00</p>`),
+	}
+}
+
+// samplePortalEditor is the PORTAL page on a controller that was never
+// configured: the default theme, no photo, and the empty-state message.
+func samplePortalEditor() *portalEditorPage {
+	h := &Handler{cfg: Config{}.withDefaults()}
+	settings := database.DefaultPortalSettings()
+	return h.newPortalEditorView(settings, newPortalEditorForm())
+}
+
+// samplePortalEditorWithBackground is the same page once the operator has
+// chosen a theme, renamed the portal and uploaded a photo.
+func samplePortalEditorWithBackground() *portalEditorPage {
+	h := &Handler{cfg: Config{}.withDefaults()}
+	uploaded := sampleTime
+	settings := database.PortalSettings{
+		Theme:          database.PortalThemeForest,
+		HeaderName:     "Tolosa Coffee Wi-Fi",
+		CustomHTML:     `<p class="hint">Open daily 08:00 - 22:00</p>`,
+		Background:     []byte{0xff, 0xd8, 0xff},
+		BackgroundType: "image/jpeg",
+		BackgroundName: "shopfront.jpg",
+		BackgroundAt:   &uploaded,
+		UpdatedAt:      sampleTime,
+	}
+	form := newPortalEditorForm()
+	form.Theme = settings.Theme
+	form.HeaderName = settings.HeaderName
+	form.CustomHTML = settings.CustomHTML
+	return h.newPortalEditorView(settings, form)
+}
+
+// invalidPortalEditor covers the rejected-save path: a too long header and a
+// script block, with both errors present so the inline messages are rendered.
+func invalidPortalEditor() *portalEditorPage {
+	h := &Handler{cfg: Config{}.withDefaults()}
+	form := newPortalEditorForm()
+	form.HeaderName = strings.Repeat("x", database.MaxPortalHeaderName+1)
+	form.CustomHTML = `<script>alert(1)</script>`
+	form.Errors["header_name"] = "Keep the header under 60 characters (this one has 61)."
+	form.Errors["custom_html"] = "Scripts are not allowed on the portal."
+	return h.newPortalEditorView(database.DefaultPortalSettings(), form)
 }
 
 // routerPageForTransport builds the device manager for one connection method, so

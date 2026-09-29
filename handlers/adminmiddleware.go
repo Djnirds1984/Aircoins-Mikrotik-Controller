@@ -17,7 +17,7 @@ import (
 // rule holds for /admin/portal/login.
 func (h *Handler) isPublicPath(r *http.Request) bool {
 	switch h.trimAdminPath(r.URL.Path) {
-	case "/portal/login", "/portal/status", "/login", "/logout":
+	case "/portal/login", "/portal/status", portalBackgroundPath, "/login", "/logout":
 		return true
 	}
 	return false
