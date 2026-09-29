@@ -25,7 +25,7 @@ func TemplateFuncs() template.FuncMap {
 		"money":         money,
 		"statusClass":   routerStatusClass,
 		"pct":           percent,
-		"portalQuery":   portalQuery,
+		"portalAction":  portalAction,
 		"add":           func(a, b int) int { return a + b },
 		"sub":           func(a, b int) int { return a - b },
 		"seq":           seq,
@@ -249,40 +249,43 @@ func seq(n int) []int {
 	return out
 }
 
-// portalQuery rebuilds the MikroTik redirect parameters so the portal POST
-// keeps mac, ip, link-login, link-orig and the server identity. Without it a
-// voucher POST would lose the context needed to complete the login.
-func portalQuery(p portalRequest) string {
+// portalAction builds the login form's action URL, preserving the MikroTik
+// redirect parameters so the POST can complete the hotspot handshake.
+//
+// It must return template.URL: html/template applies urlFilter plus
+// urlEscaper to an action attribute and percent-encodes the "=" and "&" of a
+// plain string, which collapses the whole query into one key
+// ("?ip%3d10.0.0.5%26mac%3d...") and silently breaks every login.
+//
+// The values are not trusted, so each one is re-encoded with url.Values and
+// the result is checked to be a same-origin, query-only path before it is
+// marked safe.
+func portalAction(p portalRequest) template.URL {
 	values := url.Values{}
-	if p.MAC != "" {
-		values.Set("mac", p.MAC)
+	for key, value := range map[string]string{
+		"mac":             p.MAC,
+		"ip":              p.IP,
+		"username":        p.Username,
+		"link-login":      p.LinkLogin,
+		"link-login-only": p.LinkLoginOnly,
+		"link-orig":       p.LinkOrig,
+		"server-name":     p.ServerName,
+		"chap-id":         p.ChapID,
+		"chap-challenge":  p.ChapChallenge,
+	} {
+		if value != "" {
+			values.Set(key, value)
+		}
 	}
-	if p.IP != "" {
-		values.Set("ip", p.IP)
+	query := values.Encode()
+	if query == "" {
+		return template.URL(portalLoginPath)
 	}
-	if p.Username != "" {
-		values.Set("username", p.Username)
-	}
-	if p.LinkLogin != "" {
-		values.Set("link-login", p.LinkLogin)
-	}
-	if p.LinkLoginOnly != "" {
-		values.Set("link-login-only", p.LinkLoginOnly)
-	}
-	if p.LinkOrig != "" {
-		values.Set("link-orig", p.LinkOrig)
-	}
-	if p.ServerName != "" {
-		values.Set("server-name", p.ServerName)
-	}
-	if p.ChapID != "" {
-		values.Set("chap-id", p.ChapID)
-	}
-	if p.ChapChallenge != "" {
-		values.Set("chap-challenge", p.ChapChallenge)
-	}
-	return values.Encode()
+	return template.URL(portalLoginPath + "?" + query)
 }
+
+// portalLoginPath is the captive portal sign-in endpoint.
+const portalLoginPath = "/portal/login"
 
 func defaultValue(v, fallback string) string {
 	if strings.TrimSpace(v) == "" {

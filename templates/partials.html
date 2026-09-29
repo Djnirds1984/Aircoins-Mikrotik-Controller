@@ -78,6 +78,7 @@ td.num,th.num{text-align:right}
 .btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#04121f; border-color:transparent}
 .btn.danger{color:#fca5a5; border-color:rgba(248,113,113,.4)}
 .btn.small{padding:5px 10px; font-size:.82rem; border-radius:8px}
+.btn-block{display:flex; width:100%; justify-content:center; padding:13px 16px; font-size:1rem; border-radius:12px}
 .btn-row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
 .form-grid{display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
 .field{display:flex; flex-direction:column; gap:5px}
@@ -118,6 +119,7 @@ details.editor[open] summary{margin-bottom:12px}
 .split{display:flex; gap:16px; flex-wrap:wrap; align-items:center}
 .portal{min-height:100vh; align-items:center; justify-content:center}
 .portal-wrap{width:100%; max-width:440px; margin:0 auto; padding:32px 18px 24px; flex:1; display:flex; flex-direction:column; gap:12px}
+.portal-wrap.portal-wide{max-width:520px}
 .portal-card{background:linear-gradient(180deg,var(--panel),var(--panel-2)); border:1px solid var(--line); border-radius:18px; padding:26px 24px; box-shadow:var(--shadow)}
 .portal-card h1{font-size:1.5rem; margin:.4em 0 .15em}
 .portal-card .sub{color:var(--muted); margin:0 0 14px}
@@ -138,12 +140,12 @@ details.editor[open] summary{margin-bottom:12px}
 <header class="topbar">
   <div class="brand"><span class="mark">A</span><span>{{.PortalName}}</span></div>
   <nav class="nav">
-    <a href="/"{{if eq .Nav "dashboard"}} class="active"{{end}}>Dashboard</a>
-    <a href="/routers"{{if eq .Nav "routers"}} class="active"{{end}}>Routers</a>
-    <a href="/network"{{if eq .Nav "network"}} class="active"{{end}}>Network</a>
-    <a href="/tools"{{if eq .Nav "tools"}} class="active"{{end}}>Tools</a>
-    <a href="/vouchers"{{if eq .Nav "vouchers"}} class="active"{{end}}>Vouchers</a>
-    <a href="/sessions"{{if eq .Nav "sessions"}} class="active"{{end}}>Sessions</a>
+    <a href="{{.AdminPath}}/"{{if eq .Nav "dashboard"}} class="active"{{end}}>Dashboard</a>
+    <a href="{{.AdminPath}}/routers"{{if eq .Nav "routers"}} class="active"{{end}}>Routers</a>
+    <a href="{{.AdminPath}}/network"{{if eq .Nav "network"}} class="active"{{end}}>Network</a>
+    <a href="{{.AdminPath}}/tools"{{if eq .Nav "tools"}} class="active"{{end}}>Tools</a>
+    <a href="{{.AdminPath}}/vouchers"{{if eq .Nav "vouchers"}} class="active"{{end}}>Vouchers</a>
+    <a href="{{.AdminPath}}/sessions"{{if eq .Nav "sessions"}} class="active"{{end}}>Sessions</a>
   </nav>
 </header>
 {{end}}

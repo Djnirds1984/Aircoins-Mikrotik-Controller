@@ -17,6 +17,7 @@ var templateNames = []string{
 	"sessions.html",
 	"vouchers.html",
 	"portal.html",
+	"captive.html",
 	"error.html",
 }
 

@@ -38,7 +38,7 @@
       {{if .FormError}}<div class="alert err">{{.FormError}}</div>{{end}}
       {{if .Notice}}<div class="alert warn">{{.Notice}}</div>{{end}}
 
-      <form method="post" action="/portal/login?{{portalQuery .Portal}}">
+      <form method="post" action="{{portalAction .Portal}}">
         <div class="field">
           <label for="voucher">Voucher code</label>
           <input id="voucher" name="voucher" autocomplete="off" placeholder="AIR-XXXX-XXXX"
@@ -52,7 +52,7 @@
 
       <details class="editor" style="margin-top:14px">
         <summary>Staff or username login</summary>
-        <form method="post" action="/portal/login?{{portalQuery .Portal}}" style="margin-top:10px">
+        <form method="post" action="{{portalAction .Portal}}" style="margin-top:10px">
           <div class="form-grid">
             <div class="field">
               <label for="username">Username</label>

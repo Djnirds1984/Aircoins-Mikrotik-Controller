@@ -69,8 +69,8 @@ canvas#trafficCanvas{
       <p class="sub">Registered MikroTik hotspots, live clients and the prepaid voucher ledger.</p>
     </div>
     <div class="actions">
-      <a class="btn" href="/sessions?status=open">Live sessions</a>
-      <a class="btn primary" href="/routers">Manage routers</a>
+      <a class="btn" href="{{.AdminPath}}/sessions?status=open">Live sessions</a>
+      <a class="btn primary" href="{{.AdminPath}}/routers">Manage routers</a>
     </div>
   </div>
 
@@ -184,7 +184,7 @@ canvas#trafficCanvas{
         <tbody>
         {{range .Routers}}
           <tr>
-            <td><a href="/routers/{{.Router.ID}}">{{.Router.Name}}</a>
+            <td><a href="{{$.AdminPath}}/routers/{{.Router.ID}}">{{.Router.Name}}</a>
               {{if .Router.Location}}<div class="muted" style="font-size:.8rem">{{.Router.Location}}</div>{{end}}
             </td>
             <td class="mono">{{.Router.Endpoint}}{{if eq .Router.TransportMode "rest-ssl"}} · rest-ssl{{else if eq .Router.TransportMode "rest"}} · rest{{else if eq .Router.TransportMode "api-ssl"}} · api-ssl{{else if eq .Router.TransportMode "api"}} · api{{end}}</td>
@@ -194,14 +194,14 @@ canvas#trafficCanvas{
             <td class="num">{{humanCount .OpenSessions}}</td>
             <td class="num">{{humanCount .Vouchers}}</td>
             <td class="nowrap">{{sinceLabel .Router.LastSeenAt}}</td>
-            <td class="num"><a class="btn small" href="/routers/{{.Router.ID}}">Open</a></td>
+            <td class="num"><a class="btn small" href="{{$.AdminPath}}/routers/{{.Router.ID}}">Open</a></td>
           </tr>
         {{end}}
         </tbody>
       </table>
     </div>
     {{else}}
-      <div class="empty">No routers registered yet. <a href="/routers">Add your first MikroTik device</a>.</div>
+      <div class="empty">No routers registered yet. <a href="{{.AdminPath}}/routers">Add your first MikroTik device</a>.</div>
     {{end}}
   </section>
 
@@ -245,7 +245,7 @@ canvas#trafficCanvas{
       </table>
     </div>
     {{else}}
-      <div class="empty">No vouchers generated yet. <a href="/vouchers">Create the first batch</a>.</div>
+      <div class="empty">No vouchers generated yet. <a href="{{.AdminPath}}/vouchers">Create the first batch</a>.</div>
     {{end}}
   </section>
 </main>

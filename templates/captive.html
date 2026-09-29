@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.PortalName}}</title>
+<meta name="robots" content="noindex, nofollow">
+{{template "styles" .}}
+</head>
+<body class="portal">
+<main class="portal-wrap portal-wide">
+  <div class="portal-card">
+    <div class="brand"><span class="mark">A</span><span>{{.PortalName}}</span></div>
+
+    {{if .Online}}
+      <h1>You are online</h1>
+      <p class="sub">This device is connected and browsing.</p>
+      <dl class="kv">
+        <dt>Signed in as</dt><dd class="mono">{{.OnlineUser}}</dd>
+        <dt>Connected at</dt><dd>{{.OnlineSince}}</dd>
+        <dt>Time online</dt><dd>{{.OnlineUsed}}</dd>
+      </dl>
+      <p class="hint" style="margin-top:14px">You can close this page and open any website.</p>
+      <div class="btn-row" style="margin-top:14px">
+        <a class="btn" href="/">Refresh</a>
+        {{if .Portal.LinkOrig}}<a class="btn primary" href="{{.Portal.LinkOrig}}">Continue browsing</a>{{end}}
+      </div>
+    {{else}}
+      <h1>Free Wi-Fi</h1>
+      <p class="sub">{{.Tagline}}</p>
+
+      <p><a class="btn primary btn-block" href="{{.LoginURL}}">Connect to the internet</a></p>
+
+      <details class="editor" style="margin-top:16px">
+        <summary>I already have a code</summary>
+        <form method="post" action="/portal/login" style="margin-top:12px">
+          <div class="field">
+            <label for="voucher">Voucher code</label>
+            <input id="voucher" name="voucher" autocomplete="off" placeholder="AIR-XXXX-XXXX" inputmode="latin">
+          </div>
+          <div class="btn-row" style="margin-top:12px">
+            <button class="btn primary" type="submit">Connect now</button>
+          </div>
+        </form>
+      </details>
+
+      <p class="hint" style="margin-top:16px">{{.Support}}</p>
+      {{if .RouterKnown}}
+        <p class="hint">Network: <strong>{{.RouterName}}</strong></p>
+      {{end}}
+    {{end}}
+  </div>
+
+  <p class="portal-foot">
+    <a href="{{.AdminPath}}/" rel="nofollow">Staff &amp; administration</a>
+  </p>
+</main>
+</body>
+</html>

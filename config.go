@@ -30,6 +30,13 @@ func loadConfig() (appConfig, string, error) {
 
 	cfg.Handler.APITimeout = timeout
 	cfg.Handler.PortalName = envOr("PORTAL_NAME", "Aircoins Hotspot")
+	cfg.Handler.PortalTagline = envOr("PORTAL_TAGLINE", "Connect to the Wi-Fi to get online")
+	cfg.Handler.PortalSupport = envOr("PORTAL_SUPPORT", "Ask the front desk for a voucher code.")
+	// The panel lives under ADMIN_PATH (default /admin) so a guest who opens
+	// the IP of the board only gets the captive portal. DASHBOARD_AT_ROOT=true
+	// restores the previous layout where / is the operator dashboard.
+	cfg.Handler.AdminPath = envOr("ADMIN_PATH", "/admin")
+	cfg.Handler.DashboardAtRoot = envBool("DASHBOARD_AT_ROOT")
 	cfg.Handler.DefaultRedirect = strings.TrimSpace(os.Getenv("DEFAULT_REDIRECT"))
 	cfg.Handler.SecureCookies = envBool("SECURE_COOKIES")
 

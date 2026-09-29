@@ -8,14 +8,25 @@ redirect parameters (`mac`, `ip`, `link-login`, `link-orig`).
 
 ## Quick start (Ubuntu)
 
+Two front doors, on purpose:
+
+- `http://<board-ip>/` — the **captive portal**. Every hotspot client that
+  opens the controller IP lands here. It greets a device that is already
+  online, and otherwise offers a sign-in button plus a voucher field. A
+  MikroTik hotspot that redirects with `?link-login=…&mac=…&link-orig=…` is
+  forwarded straight to the sign-in form with those parameters intact.
+- `http://<board-ip>/admin/` — the **operator panel** (dashboard, routers,
+  network, vouchers, sessions, tools). `/admin` redirects to `/admin/`.
+
+The panel routes are *also* still mounted at the root, so `/routers`,
+`/vouchers`, `/api/v1/...`, `/healthz` and existing bookmarks keep working.
+
 ```bash
 sudo apt update && sudo apt install -y golang-go
 go build -o /tmp/aircoins-controller .
 sudo ADDR=:80 DB_PATH=/tmp/aircoins.db ./aircoins-controller
 ```
 
-Open `http://localhost/` (dashboard), `/routers`,
-`/vouchers`, `/sessions`, `/tools`, `/portal/login`, `/healthz`.
 Port 80 is privileged, so the manual run above uses `sudo`; without root run it
 as `ADDR=:8080 DB_PATH=/tmp/aircoins.db ./aircoins-controller`. `install.sh`
 grants the service the capability it needs instead (see `INSTALLATION.md` §F).
@@ -39,6 +50,10 @@ helper and matching sudoers rule.
 | `SECRET_KEY_PATH` | `data/secret.key` | Master key file (created `0600`) |
 | `AIRCOINS_SECRET_KEY` | — | Master key override (base64/hex, 32 bytes) |
 | `PORTAL_NAME` | `Aircoins Hotspot` | Brand in UI and portal |
+| `ADMIN_PATH` | `/admin` | URL prefix of the operator panel; `/` stays the captive portal |
+| `DASHBOARD_AT_ROOT` | — | Set `1` to put the dashboard back on `/` (portal moves to `/portal`) |
+| `PORTAL_TAGLINE` | `Connect to the Wi-Fi to get online` | Welcome line on the portal landing page |
+| `PORTAL_SUPPORT` | `Ask the front desk for a voucher code.` | Contact line on the portal landing page |
 | `DEFAULT_REDIRECT` | — | Portal fallback when `link-orig` is absent |
 | `API_TIMEOUT` | `12s` | Per-call RouterOS timeout |
 | `SECURE_COOKIES` | — | Set `1` behind HTTPS |

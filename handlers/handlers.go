@@ -30,6 +30,20 @@ type Config struct {
 	APITimeout time.Duration
 	// PortalName is shown on the captive portal and in the admin footer.
 	PortalName string
+	// PortalTagline is the welcome line on the captive portal landing page.
+	PortalTagline string
+	// PortalSupport is the contact line shown on the captive portal, e.g.
+	// "Ask at the counter for a voucher".
+	PortalSupport string
+	// AdminPath is the URL prefix the operator panel is served under, so a
+	// guest who opens the controller IP only sees the captive portal.
+	AdminPath string
+	// DashboardAtRoot keeps the operator dashboard on / and moves the
+	// captive portal to /portal only. It is opt-in: by default / serves the
+	// captive portal and the panel lives under AdminPath. A bool named for
+	// the exception cannot be silently flipped by a zero Config value, which
+	// would hand every guest the fleet dashboard.
+	DashboardAtRoot bool
 	// DefaultRedirect is used when the client provides no link-orig.
 	DefaultRedirect string
 	// SecureCookies sets the Secure flag on admin cookies. Enable it behind
@@ -52,6 +66,19 @@ func (c Config) withDefaults() Config {
 	}
 	if strings.TrimSpace(c.PortalName) == "" {
 		c.PortalName = "Aircoins Hotspot"
+	}
+	if strings.TrimSpace(c.PortalTagline) == "" {
+		c.PortalTagline = "Connect to the Wi-Fi to get online"
+	}
+	if strings.TrimSpace(c.PortalSupport) == "" {
+		c.PortalSupport = "Ask the front desk for a voucher code."
+	}
+	// The panel prefix must be a clean absolute path with no trailing slash:
+	// it is concatenated with route suffixes by http.StripPrefix, and a
+	// trailing slash there would leave "/admin/routers" as "routers".
+	c.AdminPath = "/" + strings.Trim(strings.TrimSpace(c.AdminPath), "/")
+	if c.AdminPath == "/" {
+		c.AdminPath = "/admin"
 	}
 	if c.Logger == nil {
 		c.Logger = slog.New(slog.DiscardHandler)
@@ -91,12 +118,55 @@ func New(db *database.DB, tpl *template.Template, cfg Config) *Handler {
 }
 
 // Routes wires every endpoint and wraps them in the middleware chain.
+//
+// Two front doors are exposed on purpose:
+//
+//   - "/" is the captive portal a hotspot client lands on. Opening the IP of
+//     the controller in a browser must never reveal the fleet dashboard.
+//   - "/admin" is the operator panel, mounted with http.StripPrefix so the
+//     whole existing route table keeps its original paths and templates.
+//
+// The admin routes stay reachable at the root as well ("/routers",
+// "/vouchers", "/api/v1/...", "/portal/login") so existing bookmarks, the
+// dashboard's own absolute links and the REST clients keep working.
 func (h *Handler) Routes() http.Handler {
+	admin := h.adminRoutes()
+
+	mux := http.NewServeMux()
+
+	// The captive portal at the root, or the dashboard when the operator
+	// explicitly asked for the old layout.
+	if h.cfg.DashboardAtRoot {
+		mux.HandleFunc("GET /{$}", h.Dashboard)
+		mux.HandleFunc("GET /portal", h.PortalIndex)
+		mux.HandleFunc("GET /portal/", h.PortalIndex)
+	} else {
+		mux.HandleFunc("GET /{$}", h.PortalIndex)
+	}
+
+	// The panel under its prefix. "/admin" (no slash) has to redirect by hand
+	// because the subtree pattern only matches "/admin/".
+	mux.Handle(h.cfg.AdminPath+"/", http.StripPrefix(h.cfg.AdminPath, admin))
+	mux.HandleFunc("GET "+h.cfg.AdminPath, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, h.cfg.AdminPath+"/", http.StatusMovedPermanently)
+	})
+
+	// Health stays a flat, prefix-free probe for systemd and load balancers.
+	mux.HandleFunc("GET /healthz", h.Health)
+
+	// Everything else is the admin route table, unmounted.
+	mux.Handle("/", admin)
+
+	return h.recoverer(h.logRequests(h.securityHeaders(h.csrfGuard(mux))))
+}
+
+// adminRoutes is the operator panel and the machine facing API, mounted both
+// at the root and under Config.AdminPath.
+func (h *Handler) adminRoutes() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// Discovery and health.
 	mux.HandleFunc("GET /{$}", h.Dashboard)
-	mux.HandleFunc("GET /healthz", h.Health)
 
 	// Router inventory.
 	mux.HandleFunc("GET /routers", h.RoutersList)
@@ -172,14 +242,16 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("POST /vouchers/{id}/push", h.VoucherPush)
 	mux.HandleFunc("POST /vouchers/{id}/validate", h.VoucherValidate)
 
-	// Captive portal.
+	// Captive portal. The login form stays on its own path: the landing page
+	// at "/" is a separate handler so a direct visit is not answered with a
+	// form that has no hotspot parameters to submit.
 	mux.HandleFunc("GET /portal/login", h.PortalLogin)
 	mux.HandleFunc("POST /portal/login", h.PortalAuthenticate)
 	mux.HandleFunc("GET /portal/status", h.PortalStatus)
 
 	// REST API (RouterOS v7+ compatible).
 	h.RoutesAPI(mux)
-	return h.recoverer(h.logRequests(h.securityHeaders(h.csrfGuard(mux))))
+	return mux
 }
 
 // recoverer turns a panic in any handler into a 500 instead of killing the
@@ -270,11 +342,11 @@ func (h *Handler) csrfGuard(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+		if strings.HasPrefix(h.trimAdminPath(r.URL.Path), "/api/v1/") {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/portal/") {
+		if strings.HasPrefix(h.trimAdminPath(r.URL.Path), "/portal/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -329,6 +401,23 @@ func randomToken(n int) string {
 	return base64.RawURLEncoding.EncodeToString(buf)
 }
 
+// trimAdminPath removes the panel prefix from a request path so middleware can
+// reason about one canonical set of routes. The portal and the API are mounted
+// under /admin as well as at the root, and a portal login submitted from
+// /admin/portal/login must still be recognised as a portal route.
+func (h *Handler) trimAdminPath(path string) string {
+	if h.cfg.AdminPath == "" || h.cfg.AdminPath == "/" {
+		return path
+	}
+	if path == h.cfg.AdminPath {
+		return "/"
+	}
+	if strings.HasPrefix(path, h.cfg.AdminPath+"/") {
+		return strings.TrimPrefix(path, h.cfg.AdminPath)
+	}
+	return path
+}
+
 // page holds the values every template needs.
 type page struct {
 	Title      string
@@ -340,6 +429,9 @@ type page struct {
 	Year       int
 	// Back is the page the shared voucher/action forms return to.
 	Back string
+	// AdminPath is the prefix the operator panel is mounted under, so the
+	// navigation can stay inside /admin instead of bouncing to the portal.
+	AdminPath string
 }
 
 // pageRenderer lets render() inject the request scoped values without every
@@ -436,6 +528,9 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request, status int, nam
 	p.PortalName = h.cfg.PortalName
 	p.Version = h.cfg.Version
 	p.Year = time.Now().UTC().Year()
+	if p.AdminPath == "" {
+		p.AdminPath = h.cfg.AdminPath
+	}
 	if p.Flash == nil {
 		p.Flash = popFlash(w, r)
 	}
