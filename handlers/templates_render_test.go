@@ -322,6 +322,7 @@ func TestPageTemplatesRender(t *testing.T) {
 		{"portal success", "portal.html", onlinePortal},
 		{"captive welcome", "captive.html", captive},
 		{"portal editor", "portal_editor.html", samplePortalEditor()},
+		{"portal editor full page", "portal_editor.html", fullPagePortalEditor()},
 		{"portal editor with background", "portal_editor.html", samplePortalEditorWithBackground()},
 		{"portal editor errors", "portal_editor.html", invalidPortalEditor()},
 		{"error", "error.html", &errorPage{
@@ -390,6 +391,26 @@ func invalidPortalEditor() *portalEditorPage {
 	form.Errors["header_name"] = "Keep the header under 60 characters (this one has 61)."
 	form.Errors["custom_html"] = "Scripts are not allowed on the portal."
 	return h.newPortalEditorView(database.DefaultPortalSettings(), form)
+}
+
+// fullPagePortalEditor renders the editor with the operator's own document
+// loaded, which is the view that exposes the starter page and the placeholder
+// reference table.
+func fullPagePortalEditor() *portalEditorPage {
+	h := &Handler{cfg: Config{}.withDefaults()}
+	settings := database.PortalSettings{
+		Theme:      database.PortalThemeOcean,
+		HeaderName: "Tolosa Coffee",
+		PageMode:   database.PortalPageFull,
+		FullHTML: "<!DOCTYPE html><html><body><h1>{{.PortalName}}</h1>" +
+			"<form method=\"post\" action=\"{{.LoginAction}}\"><input name=\"voucher\"></form>" +
+			"<div id=\"timer\" data-seconds=\"{{.RemainingSeconds}}\"></div></body></html>",
+	}
+	form := newPortalEditorForm()
+	form.Theme = settings.Theme
+	form.PageMode = settings.PageMode
+	form.FullHTML = settings.FullHTML
+	return h.newPortalEditorView(settings, form)
 }
 
 // routerPageForTransport builds the device manager for one connection method, so

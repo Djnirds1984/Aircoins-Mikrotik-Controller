@@ -55,8 +55,86 @@
       </div>
     </section>
 
+    <section class="card">
+      <h2>Page layout</h2>
+      <p class="hint">Choose between the built-in sign-in page and a page you write yourself.</p>
+      <div class="form-grid">
+        <label class="field check">
+          <input type="radio" name="page_mode" value="standard"{{if ne .Form.PageMode "full"}} checked{{end}}>
+          <span><strong>Built-in page</strong><br>
+            <span class="muted" style="font-size:.8rem">Theme, header name and an extra HTML block. Safer, and the sign-in form always works.</span></span>
+        </label>
+        <label class="field check">
+          <input type="radio" name="page_mode" value="full"{{if eq .Form.PageMode "full"}} checked{{end}}>
+          <span><strong>My own page</strong><br>
+            <span class="muted" style="font-size:.8rem">You supply the whole document: layout, CSS and a countdown script. Replaces the built-in page.</span></span>
+        </label>
+      </div>
+      <div class="alert warn" style="margin-top:12px">
+        <strong>A page you write yourself runs in the browser of every guest who connects.</strong>
+        It may contain JavaScript, and it is served on a public URL. Only the panel
+        operator can reach this form, but if that account is ever compromised the
+        attacker can show any page they like to your customers. Remote scripts,
+        remote styles and framing stay blocked by the server's security policy.
+      </div>
+    </section>
+
     <section class="card" style="margin-top:16px">
-      <h2>Custom HTML</h2>
+      <h2>Your own page</h2>
+      <p class="hint">
+        The complete HTML document. Use the built-in form below as the starting
+        point — it is a working sign-in page wired to your hotspot.
+      </p>
+      <div class="btn-row" style="margin-bottom:12px">
+        <button class="btn small" type="button" onclick="document.getElementById('full_html').value=document.getElementById('starter').value;document.getElementById('full_html').focus()">Insert the starter page</button>
+        <a class="btn small" href="/portal/login" target="_blank" rel="noopener">Preview the live page</a>
+      </div>
+      <div class="field">
+        <label for="full_html">HTML</label>
+        <textarea id="full_html" name="full_html" class="code-area" rows="18" spellcheck="false">{{.Form.FullHTML}}</textarea>
+        {{with .Form.Errors.full_html}}<span class="error">{{.}}</span>{{end}}
+        <span class="muted" style="font-size:.78rem">
+          Up to {{div .Defaults.MaxFullBytes 1024}}&nbsp;KB. Saved with
+          <code>page_mode=full</code> above; while the built-in page is selected
+          this text is kept but not shown to guests.
+        </span>
+      </div>
+
+      <details class="editor" style="margin-top:14px">
+        <summary>Values you can use</summary>
+        <p class="hint" style="margin-top:10px">
+          These are substituted when the page is served. Anything the controller
+          fills in is escaped, so a MAC address or router name cannot break out
+          of an attribute.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Value</th><th>What it is</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">{{"{{.PortalName}}"}}</td><td>The header name set above</td></tr>
+              <tr><td class="mono">{{"{{.MAC}}"}}</td><td>The guest's MAC address</td></tr>
+              <tr><td class="mono">{{"{{.IP}}"}}</td><td>The guest's IP address</td></tr>
+              <tr><td class="mono">{{"{{.RouterName}}"}}</td><td>Device serving this hotspot</td></tr>
+              <tr><td class="mono">{{"{{.BannerURL}}"}}</td><td>Your uploaded image, or empty</td></tr>
+              <tr><td class="mono">{{"{{.LoginAction}}"}}</td><td>Form action — use in <code>&lt;form action="{{"{{.LoginAction}}"}}"&gt;</code></td></tr>
+              <tr><td class="mono">{{"{{.LoggedIn}}"}}</td><td>true after a successful sign-in</td></tr>
+              <tr><td class="mono">{{"{{.FormError}}"}}</td><td>Why the last attempt failed</td></tr>
+              <tr><td class="mono">{{"{{.Notice}}"}}</td><td>Message shown after signing in</td></tr>
+              <tr><td class="mono">{{"{{.ExpiresAt}}"}}</td><td>Allowance end time (RFC3339)</td></tr>
+              <tr><td class="mono">{{"{{.RemainingSeconds}}"}}</td><td>Seconds left, for the countdown</td></tr>
+              <tr><td class="mono">{{"{{.LoginURL}}"}}</td><td>The built-in sign-in page</td></tr>
+              <tr><td class="mono">{{"{{.Year}}"}}, {{"{{.Version}}"}}</td><td>For a footer credit line</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+
+      {{/* Rendered with sample data, so the operator sees filled-in values. */}}
+      {{template "portalStarter" .Starter}}
+    </section>
+
+    <section class="card" style="margin-top:16px">
+      <h2>Custom HTML <span class="muted" style="font-weight:400">(built-in page only)</span></h2>
       <p class="hint">
         Extra markup rendered inside the sign-in card — a terms box, opening hours,
         a contact number, a QR code. Styles from this page apply, so

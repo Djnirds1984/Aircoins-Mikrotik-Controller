@@ -100,6 +100,43 @@ func ValidPortalImageType(contentType string) bool {
 	}
 }
 
+// Portal page rendering modes.
+const (
+	// PortalPageStandard renders the built-in captive layout, with the theme,
+	// header name and custom block applied to it.
+	PortalPageStandard = "standard"
+	// PortalPageFull serves the operator's own document instead of the built-in
+	// layout.
+	PortalPageFull = "full"
+)
+
+// MaxPortalFullHTML is larger than MaxPortalCustomHTML because a full page
+// carries its own <style> and usually a countdown <script>. 256 KB is still
+// far below anything that would hurt a phone on a slow link.
+const MaxPortalFullHTML = 256 << 10
+
+// portalPageModeDDL and portalFullHTMLDDL add the full-page override. They are
+// ALTERs rather than a new table so an existing portal_settings row keeps its
+// theme and image.
+const (
+	portalPageModeDDL = `ALTER TABLE portal_settings ADD COLUMN page_mode TEXT NOT NULL DEFAULT 'standard'`
+	portalFullHTMLDDL = `ALTER TABLE portal_settings ADD COLUMN full_html TEXT NOT NULL DEFAULT ''`
+)
+
+// ValidPortalPageMode reports whether mode names a rendering mode.
+func ValidPortalPageMode(mode string) bool {
+	return mode == PortalPageStandard || mode == PortalPageFull
+}
+
+// NormalizePortalPageMode maps an unknown mode onto the standard layout, so a
+// renamed or hand-edited row can never leave the portal with no page at all.
+func NormalizePortalPageMode(mode string) string {
+	if ValidPortalPageMode(mode) {
+		return mode
+	}
+	return PortalPageStandard
+}
+
 // PortalSettings is the operator's branding of the captive portal.
 type PortalSettings struct {
 	// Theme is one of PortalThemes.
@@ -109,8 +146,20 @@ type PortalSettings struct {
 	HeaderName string
 	// CustomHTML is an extra block of markup rendered inside the portal card.
 	// It is authored by an authenticated operator and rendered to
-	// unauthenticated guests, so it is trusted input.
+	// unauthenticated guests, so it is trusted input. It only applies in the
+	// standard page mode.
 	CustomHTML string
+	// PageMode selects the built-in layout (standard) or the operator's own
+	// document (full).
+	PageMode string
+	// FullHTML is the operator's complete portal document, served instead of
+	// the built-in layout when PageMode is "full".
+	//
+	// This is the most privileged field in the controller: it is executed by
+	// the browser of every guest who connects, with no sandbox other than the
+	// Content-Security-Policy. It may contain <script>, so it is deliberately
+	// NOT subject to the checks applied to CustomHTML.
+	FullHTML string
 	// Background is the raw image bytes, empty when none is stored.
 	Background []byte
 	// BackgroundType is the sniffed content type of Background.
@@ -126,6 +175,13 @@ type PortalSettings struct {
 // HasBackground reports whether a background image is stored.
 func (s PortalSettings) HasBackground() bool { return len(s.Background) > 0 }
 
+// FullPageActive reports whether the operator's own document replaces the
+// built-in layout. An empty FullHTML counts as inactive even in "full" mode,
+// so a half-filled form can never blank the portal for every guest.
+func (s PortalSettings) FullPageActive() bool {
+	return s.PageMode == PortalPageFull && strings.TrimSpace(s.FullHTML) != ""
+}
+
 // PortalSettingsStore persists the single portal appearance row.
 type PortalSettingsStore struct{ db *DB }
 
@@ -133,12 +189,13 @@ type PortalSettingsStore struct{ db *DB }
 func (db *DB) PortalSettings() *PortalSettingsStore { return &PortalSettingsStore{db: db} }
 
 const portalSettingsColumns = `theme, header_name, custom_html, background,
-    background_type, background_name, background_at, updated_at`
+    background_type, background_name, background_at, updated_at, page_mode, full_html`
 
 // DefaultPortalSettings is what a controller that was never configured serves:
-// the built-in dark theme, the environment portal name and no extra content.
+// the built-in dark theme, the standard layout, the environment portal name and
+// no extra content.
 func DefaultPortalSettings() PortalSettings {
-	return PortalSettings{Theme: DefaultPortalTheme}
+	return PortalSettings{Theme: DefaultPortalTheme, PageMode: PortalPageStandard}
 }
 
 // Get loads the portal appearance, falling back to the defaults when the row
@@ -157,9 +214,11 @@ func (s *PortalSettingsStore) Get(ctx context.Context) (PortalSettings, error) {
 		backgroundNam sql.NullString
 		backgroundAt  sql.NullString
 		updated       sql.NullString
+		pageMode      sql.NullString
+		fullHTML      sql.NullString
 	)
 	err := row.Scan(&theme, &headerName, &customHTML, &background,
-		&backgroundTyp, &backgroundNam, &backgroundAt, &updated)
+		&backgroundTyp, &backgroundNam, &backgroundAt, &updated, &pageMode, &fullHTML)
 	if errors.Is(err, sql.ErrNoRows) {
 		return settings, nil
 	}
@@ -169,6 +228,8 @@ func (s *PortalSettingsStore) Get(ctx context.Context) (PortalSettings, error) {
 	settings.Theme = NormalizePortalTheme(theme)
 	settings.HeaderName = headerName
 	settings.CustomHTML = customHTML
+	settings.PageMode = NormalizePortalPageMode(pageMode.String)
+	settings.FullHTML = fullHTML.String
 	settings.Background = background
 	settings.BackgroundType = backgroundTyp.String
 	settings.BackgroundName = backgroundNam.String
@@ -194,16 +255,30 @@ func (s *PortalSettingsStore) Save(ctx context.Context, settings PortalSettings)
 	if len(settings.CustomHTML) > MaxPortalCustomHTML {
 		return fmt.Errorf("database: portal custom HTML is larger than %d bytes", MaxPortalCustomHTML)
 	}
+	// An empty page mode means "the caller did not set one", not "an invalid
+	// one": it is normalised onto the standard layout the same way an unknown
+	// theme is, so a zero-valued struct is still usable.
+	if settings.PageMode == "" {
+		settings.PageMode = PortalPageStandard
+	}
+	if !ValidPortalPageMode(settings.PageMode) {
+		return fmt.Errorf("database: unknown portal page mode %q", settings.PageMode)
+	}
+	if len(settings.FullHTML) > MaxPortalFullHTML {
+		return fmt.Errorf("database: portal full page HTML is larger than %d bytes", MaxPortalFullHTML)
+	}
 	if _, err := s.db.sql.ExecContext(ctx, `
-        INSERT INTO portal_settings (id, theme, header_name, custom_html, updated_at)
-        VALUES (1, ?, ?, ?, ?)
+        INSERT INTO portal_settings (id, theme, header_name, custom_html, updated_at, page_mode, full_html)
+        VALUES (1, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             theme       = excluded.theme,
             header_name = excluded.header_name,
             custom_html = excluded.custom_html,
-            updated_at  = excluded.updated_at`,
+            updated_at  = excluded.updated_at,
+            page_mode   = excluded.page_mode,
+            full_html   = excluded.full_html`,
 		settings.Theme, settings.HeaderName, settings.CustomHTML,
-		stamp(now())); err != nil {
+		stamp(now()), settings.PageMode, settings.FullHTML); err != nil {
 		return wrapDBError("save portal settings", err)
 	}
 	return nil

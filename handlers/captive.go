@@ -85,6 +85,37 @@ func (h *Handler) PortalIndex(w http.ResponseWriter, r *http.Request) {
 	h.render(w, r, http.StatusOK, "captive.html", view)
 }
 
+// PortalProbe answers an operating system's captive-portal detection request
+// with the portal.
+//
+// The probe URLs carry no hotspot parameters, so this deliberately does not go
+// through PortalIndex: that handler looks for a MAC/IP, finds none, and still
+// renders the welcome page - correct, but it also logs a "no router" warning on
+// every single probe. Keeping the two apart makes a probe cheap and quiet while
+// a real visit to "/" behaves exactly as before.
+func (h *Handler) PortalProbe(w http.ResponseWriter, r *http.Request) {
+	// If a hotspot did manage to append its parameters, the guest should end up
+	// on the real sign-in form with them intact.
+	if request := portalRequestFromValues(r.URL.Query()); !request.empty() {
+		h.PortalLogin(w, r)
+		return
+	}
+
+	view := &captivePage{
+		page:      page{Title: "Wi-Fi sign in", Nav: ""},
+		Tagline:   h.cfg.PortalTagline,
+		Support:   h.cfg.PortalSupport,
+		AdminPath: h.cfg.AdminPath,
+		LoginURL:  "/portal/login",
+		Branding:  h.portalBrandingFor(r.Context()),
+	}
+	if router, err := h.resolvePortalRouter(r.Context(), portalRequest{}); err == nil {
+		view.RouterName = router.Name
+		view.RouterKnown = true
+	}
+	h.render(w, r, http.StatusOK, "captive.html", view)
+}
+
 // portalClientSession looks for a live session owned by the address of the
 // current request. The controller stores the guest address, so this is what
 // lets the welcome page greet a client that already signed in instead of

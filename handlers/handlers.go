@@ -116,12 +116,15 @@ type Handler struct {
 	// loginGuard throttles password guesses against the panel sign-in form.
 	loginGuard *loginGuard
 	traffic    trafficStore
+	// portalFull serves the operator's own portal document when the PORTAL
+	// editor is in full-page mode. It caches the compiled template.
+	portalFull *portalFullRenderer
 }
 
 // New builds a Handler. The template set must already be parsed.
 func New(db *database.DB, tpl *template.Template, cfg Config) *Handler {
 	cfg = cfg.withDefaults()
-	return &Handler{
+	h := &Handler{
 		db:         db,
 		tpl:        tpl,
 		cfg:        cfg,
@@ -129,6 +132,35 @@ func New(db *database.DB, tpl *template.Template, cfg Config) *Handler {
 		limiter:    newIPLimiter(cfg.PortalLoginBurst, cfg.PortalLoginWindow),
 		loginGuard: defaultLoginGuard(),
 	}
+	h.portalFull = newPortalFullRenderer(h)
+	return h
+}
+
+// captiveProbePaths are the URLs operating systems request while deciding
+// whether they are behind a captive portal.
+//
+// A joining phone does not only ask for "/": Android probes /generate_204 and
+// /genindex.html, iOS probes /library/test/success.html and Windows probes
+// /connecttest.txt. Every one of them used to fall through to the guarded
+// catch-all, which answered with a redirect to the operator login form - so a
+// guest that joined the SSID was shown the panel's sign-in page and handed the
+// credentials of the router fleet.
+//
+// They are served the portal instead, which is what makes the phone pop the
+// login window. Serving the sign-in page for a probe is also what a stock
+// MikroTik hotspot does, so a walled-garden phone behaves identically whichever
+// portal it is pointed at.
+var captiveProbePaths = []string{
+	"/generate_204",
+	"/genindex.html",
+	"/library/test/success.html",
+	"/connecttest.txt",
+	"/ncsi.txt",
+	"/canonical.html",
+	"/success.txt",
+	"/hotspot-detect.html",
+	"/msftconnecttest",
+	"/redirect",
 }
 
 // Routes wires every endpoint and wraps them in the middleware chain.
@@ -156,6 +188,19 @@ func (h *Handler) Routes() http.Handler {
 		mux.HandleFunc("GET /portal/", h.PortalIndex)
 	} else {
 		mux.HandleFunc("GET /{$}", h.PortalIndex)
+	}
+
+	// The operating-system captive probes are answered with the portal rather
+	// than being left to the guarded catch-all below. Registering them here, and
+	// not in adminRoutes, is what keeps them public: the catch-all mounts the
+	// whole admin table behind requireAuth, which is what used to send a guest
+	// to the operator login form.
+	//
+	// They are registered on the outer mux only. Mounted under /admin they would
+	// be a path an attacker could reach to bypass the session, and the panel
+	// prefix is a deployment detail no phone knows about.
+	for _, probe := range captiveProbePaths {
+		mux.HandleFunc("GET "+probe, h.PortalProbe)
 	}
 
 	// The panel under its prefix, behind the session guard. "/admin" (no

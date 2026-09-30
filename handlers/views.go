@@ -28,10 +28,14 @@ func TemplateFuncs() template.FuncMap {
 		"portalAction":  portalAction,
 		"add":           func(a, b int) int { return a + b },
 		"sub":           func(a, b int) int { return a - b },
-		"seq":           seq,
-		"upper":         strings.ToUpper,
-		"lower":         strings.ToLower,
-		"default":       defaultValue,
+		// div renders a byte count in whole units, so a limit shown in the UI
+		// ("up to 256 KB") is computed from the same constant the handler
+		// enforces rather than being retyped in the template.
+		"div":     func(a, b int) int { return a / b },
+		"seq":     seq,
+		"upper":   strings.ToUpper,
+		"lower":   strings.ToLower,
+		"default": defaultValue,
 	}
 }
 

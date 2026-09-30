@@ -171,6 +171,17 @@ var migrations = []migration{
 			portalSettingsDDL,
 		},
 	},
+	{
+		version: 5,
+		name:    "portal-full-page",
+		statements: []string{
+			// "standard" renders the built-in captive layout; "full" serves
+			// the operator's own document instead. The default keeps every
+			// existing install on the built-in page.
+			portalPageModeDDL,
+			portalFullHTMLDDL,
+		},
+	},
 }
 
 // migrate applies every pending migration inside its own transaction.

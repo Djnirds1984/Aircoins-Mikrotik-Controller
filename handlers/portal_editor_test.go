@@ -25,7 +25,90 @@ func editorConfig() Config {
 	return Config{AdminPath: "/admin", PortalName: "Aircoins Hotspot", Version: "test"}
 }
 
-// TestPortalEditorPageRenders proves the new PORTAL page is reachable from the
+// TestCaptiveProbePathsShowThePortal pins the answer to a support report: a
+// device that joined the SSID was shown the panel's login form instead of the
+// captive portal.
+//
+// The cause is that the auth guard answers every path the router does not
+// match, and a joining phone does not only ask for "/". Android probes
+// /generate_204 and /genindex.html, iOS probes /library/test/success.html, and
+// Windows probes /connecttest.txt, all before it shows any page. Each of those
+// fell through to the guarded catch-all and got redirected to the operator
+// login, which is what the customer saw.
+func TestCaptiveProbePathsShowThePortal(t *testing.T) {
+	base, _ := newCaptiveE2E(t, Config{})
+
+	// Paths the well-known operating systems probe during captive detection,
+	// plus the ones a hotspot operator is likely to configure by hand.
+	probes := []string{
+		"/",
+		"/generate_204",
+		"/genindex.html",
+		"/library/test/success.html",
+		"/connecttest.txt",
+		"/ncsi.txt",
+		"/canonical.html",
+		"/success.txt",
+		"/hotspot-detect.html",
+		"/msftconnecttest",
+		"/redirect",
+	}
+	for _, path := range probes {
+		t.Run(path, func(t *testing.T) {
+			resp, err := noRedirect().Get(base + path)
+			if err != nil {
+				t.Fatalf("GET %s: %v", path, err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusFound {
+				t.Errorf("GET %s redirected to %q: a guest is being sent to the panel",
+					path, resp.Header.Get("Location"))
+				return
+			}
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("GET %s status = %d, want 200", path, resp.StatusCode)
+				return
+			}
+			// The response has to be the portal, not merely a 200: the panel's
+			// own sign-in form is also a 200, which is what made the original
+			// report easy to misread as "it works".
+			raw, _ := io.ReadAll(resp.Body)
+			body := string(raw)
+			if strings.Contains(body, `name="csrf_token"`) && strings.Contains(body, "Operator name") {
+				t.Errorf("GET %s served the panel login form instead of the captive portal", path)
+			}
+			if !strings.Contains(body, "Connect to the internet") && !strings.Contains(body, "Free Wi-Fi") {
+				t.Errorf("GET %s did not serve the captive portal", path)
+			}
+		})
+	}
+}
+
+// TestPanelPathsStillGuarded is the other half of the contract above: widening
+// what a guest can reach must not expose the fleet. The panel routes keep their
+// redirect to the login form.
+func TestPanelPathsStillGuarded(t *testing.T) {
+	base, _ := newUnauthE2E(t, Config{})
+
+	for _, path := range []string{"/admin/routers", "/admin/vouchers", "/routers", "/api/v1/routers"} {
+		t.Run(path, func(t *testing.T) {
+			resp, err := noRedirect().Get(base + path)
+			if err != nil {
+				t.Fatalf("GET %s: %v", path, err)
+			}
+			defer resp.Body.Close()
+			want := http.StatusSeeOther
+			if strings.HasPrefix(path, "/api/") {
+				// A JSON caller gets 401, not an HTML redirect.
+				want = http.StatusUnauthorized
+			}
+			if resp.StatusCode != want {
+				t.Errorf("GET %s status = %d, want %d", path, resp.StatusCode, want)
+			}
+		})
+	}
+}
+
 // navigation and offers all five themes.
 func TestPortalEditorPageRenders(t *testing.T) {
 	base, db := newCaptiveE2E(t, editorConfig())

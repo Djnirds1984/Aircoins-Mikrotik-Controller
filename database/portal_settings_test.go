@@ -129,6 +129,100 @@ func TestPortalSettingsRejectsBadInput(t *testing.T) {
 	}
 }
 
+// TestPortalPageModeRoundTrip covers the full-page override at the store level:
+// the mode and the document survive a save, and the guards around them hold.
+func TestPortalPageModeRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	store := db.PortalSettings()
+
+	// A fresh install is on the standard layout, not in full-page mode.
+	fresh, err := store.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if fresh.PageMode != PortalPageStandard || fresh.FullPageActive() {
+		t.Errorf("a fresh install is not on the standard layout: %+v", fresh)
+	}
+
+	page := "<html><body><script>tick()</script>{{.MAC}}</body></html>"
+	if err := store.Save(ctx, PortalSettings{
+		Theme:    DefaultPortalTheme,
+		PageMode: PortalPageFull,
+		FullHTML: page,
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := store.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.PageMode != PortalPageFull {
+		t.Errorf("PageMode = %q, want %q", got.PageMode, PortalPageFull)
+	}
+	if got.FullHTML != page {
+		t.Error("the saved page did not survive the round trip")
+	}
+	if !got.FullPageActive() {
+		t.Error("FullPageActive is false for a stored full page")
+	}
+
+	// Switching back to the standard layout keeps the document, so an operator
+	// who changes their mind does not lose the work.
+	if err := store.Save(ctx, PortalSettings{
+		Theme: DefaultPortalTheme, PageMode: PortalPageStandard, FullHTML: page,
+	}); err != nil {
+		t.Fatalf("Save standard: %v", err)
+	}
+	back, err := store.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if back.FullPageActive() {
+		t.Error("the operator page is still active in standard mode")
+	}
+	if back.FullHTML != page {
+		t.Error("switching to the standard layout discarded the page")
+	}
+
+	// An empty document counts as inactive even in full mode: a half-filled form
+	// must not be able to blank the portal for every guest.
+	if err := store.Save(ctx, PortalSettings{
+		Theme: DefaultPortalTheme, PageMode: PortalPageFull, FullHTML: "  ",
+	}); err != nil {
+		t.Fatalf("Save empty: %v", err)
+	}
+	empty, err := store.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if empty.FullPageActive() {
+		t.Error("a blank page in full mode is treated as active")
+	}
+
+	// Guards.
+	if err := store.Save(ctx, PortalSettings{Theme: DefaultPortalTheme, PageMode: "sidebar"}); err == nil {
+		t.Error("an unknown page mode was accepted")
+	}
+	oversized := make([]byte, MaxPortalFullHTML+1)
+	if err := store.Save(ctx, PortalSettings{
+		Theme: DefaultPortalTheme, PageMode: PortalPageFull, FullHTML: string(oversized),
+	}); err == nil {
+		t.Error("an oversized full page was accepted")
+	}
+}
+
+// TestNormalizePortalPageModeFallsBack proves an unknown stored mode degrades to
+// the standard layout rather than leaving the portal with no page at all.
+func TestNormalizePortalPageModeFallsBack(t *testing.T) {
+	if got := NormalizePortalPageMode("sidebar"); got != PortalPageStandard {
+		t.Errorf("NormalizePortalPageMode(sidebar) = %q, want %q", got, PortalPageStandard)
+	}
+	if got := NormalizePortalPageMode(""); got != PortalPageStandard {
+		t.Errorf("NormalizePortalPageMode(empty) = %q, want %q", got, PortalPageStandard)
+	}
+}
+
 // TestNormalizePortalThemeFallsBack proves a stored key that no longer exists
 // (a renamed theme, or a hand-edited row) degrades to the default instead of
 // producing a portal with no colours at all.

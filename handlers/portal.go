@@ -107,7 +107,7 @@ func (h *Handler) PortalLogin(w http.ResponseWriter, r *http.Request) {
 		view.RouterKnown = true
 	}
 
-	h.render(w, r, http.StatusOK, "portal.html", view)
+	h.renderPortal(w, r, http.StatusOK, view)
 }
 
 // PortalAuthenticate handles both login styles of the portal: a voucher key or
@@ -136,7 +136,7 @@ func (h *Handler) PortalAuthenticate(w http.ResponseWriter, r *http.Request) {
 
 	if request.IP == "" && request.MAC == "" {
 		view.FormError = "This login page was opened directly. Connect to the hotspot Wi-Fi and the form will work."
-		h.render(w, r, http.StatusBadRequest, "portal.html", view)
+		h.renderPortal(w, r, http.StatusBadRequest, view)
 		return
 	}
 
@@ -144,7 +144,7 @@ func (h *Handler) PortalAuthenticate(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		view.FormError = "This hotspot is not linked to the Aircoins controller yet. Please ask the front desk for help."
 		h.log.Warn("portal login without router", "remote", clientIP(r), "error", err)
-		h.render(w, r, http.StatusServiceUnavailable, "portal.html", view)
+		h.renderPortal(w, r, http.StatusServiceUnavailable, view)
 		return
 	}
 	view.RouterName = router.Name
@@ -152,14 +152,14 @@ func (h *Handler) PortalAuthenticate(w http.ResponseWriter, r *http.Request) {
 
 	if voucherCode == "" && username == "" {
 		view.FormError = "Enter your voucher code, or your hotspot username and password."
-		h.render(w, r, http.StatusBadRequest, "portal.html", view)
+		h.renderPortal(w, r, http.StatusBadRequest, view)
 		return
 	}
 
 	client, err := h.dialRouter(ctx, router)
 	if err != nil {
 		view.FormError = "The hotspot gateway cannot be reached right now (" + routerErrorHint(err) + "). Please try again in a moment."
-		h.render(w, r, http.StatusServiceUnavailable, "portal.html", view)
+		h.renderPortal(w, r, http.StatusServiceUnavailable, view)
 		return
 	}
 	defer client.Close()
@@ -184,7 +184,7 @@ func (h *Handler) portalRedeemVoucher(w http.ResponseWriter, r *http.Request, vi
 		if errors.Is(err, database.ErrNotFound) {
 			h.log.Info("portal rejected unknown voucher", "remote", clientIP(r), "router", router.Name)
 			view.FormError = "That voucher code was not recognised. Check the spelling, or ask the front desk."
-			h.render(w, r, http.StatusOK, "portal.html", view)
+			h.renderPortal(w, r, http.StatusOK, view)
 			return
 		}
 		h.fail(w, r, "look up voucher", err)
@@ -194,7 +194,7 @@ func (h *Handler) portalRedeemVoucher(w http.ResponseWriter, r *http.Request, vi
 	// A key issued for another device cannot be honoured here.
 	if voucher.RouterID != nil && *voucher.RouterID != router.ID {
 		view.FormError = "That voucher belongs to a different hotspot. Please use the key issued for this location."
-		h.render(w, r, http.StatusOK, "portal.html", view)
+		h.renderPortal(w, r, http.StatusOK, view)
 		return
 	}
 
@@ -209,7 +209,7 @@ func (h *Handler) portalRedeemVoucher(w http.ResponseWriter, r *http.Request, vi
 		default:
 			view.FormError = "That voucher could not be activated: " + routerErrorHint(err)
 		}
-		h.render(w, r, http.StatusOK, "portal.html", view)
+		h.renderPortal(w, r, http.StatusOK, view)
 		return
 	}
 
@@ -242,13 +242,46 @@ func (h *Handler) portalPasswordLogin(w http.ResponseWriter, r *http.Request, vi
 		default:
 			view.FormError = "Login was refused: " + routerErrorHint(err)
 		}
-		h.render(w, r, http.StatusOK, "portal.html", view)
+		h.renderPortal(w, r, http.StatusOK, view)
 		return
 	}
 
 	h.registerPortalSession(r.Context(), router, username, request, "password")
 	view.Success = true
 	h.finishPortalLogin(w, r, view, request, username, password, true)
+}
+
+// renderPortal writes the captive portal to the client.
+//
+// When the operator has switched the PORTAL editor to full-page mode their own
+// document is served instead. It is rendered through this one helper on every
+// path that would otherwise render portal.html, so a guest sees the same page
+// whether they arrived at the welcome screen, the sign-in form or the result of
+// a login attempt. A page that fails to compile falls back to the built-in
+// layout rather than showing the guest an error.
+func (h *Handler) renderPortal(w http.ResponseWriter, r *http.Request, status int, view *portalPage) {
+	settings, err := h.db.PortalSettings().Get(r.Context())
+	if err != nil {
+		// Degrade to the built-in page: a guest cannot fix a database read
+		// error, and a working sign-in form beats a 500.
+		h.log.Warn("portal settings unavailable, serving the built-in page", "error", err)
+		h.render(w, r, status, "portal.html", view)
+		return
+	}
+
+	env := portalFullContext{
+		PortalName: view.Branding.HeaderName,
+		AdminPath:  h.cfg.AdminPath,
+		Version:    h.cfg.Version,
+		Year:       time.Now().UTC().Year(),
+	}
+	if settings.HasBackground() {
+		env.BannerURL = portalBackgroundPath
+	}
+	if h.portalFull.render(w, r, view, settings, env) {
+		return
+	}
+	h.render(w, r, status, "portal.html", view)
 }
 
 // finishPortalLogin sends the client on to its original destination, or renders
@@ -268,7 +301,7 @@ func (h *Handler) finishPortalLogin(w http.ResponseWriter, r *http.Request, view
 
 	target := h.portalRedirectTarget(request)
 	if target == "" {
-		h.render(w, r, http.StatusOK, "portal.html", view)
+		h.renderPortal(w, r, http.StatusOK, view)
 		return
 	}
 	view.RedirectTo = target

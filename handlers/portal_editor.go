@@ -57,6 +57,7 @@ type portalEditorDefaults struct {
 	MaxHeaderRunes int
 	MaxHTMLBytes   int
 	MaxImageBytes  int
+	MaxFullBytes   int
 }
 
 // portalTheme is one selectable theme with the CSS that implements it.
@@ -139,11 +140,20 @@ type portalEditorForm struct {
 	HeaderName string
 	Theme      string
 	CustomHTML string
-	Errors     map[string]string
+	// PageMode is "standard" for the built-in layout or "full" for the
+	// operator's own document.
+	PageMode string
+	// FullHTML is the operator's complete portal page, used in full mode.
+	FullHTML string
+	Errors   map[string]string
 }
 
 func newPortalEditorForm() portalEditorForm {
-	return portalEditorForm{Theme: database.DefaultPortalTheme, Errors: map[string]string{}}
+	return portalEditorForm{
+		Theme:    database.DefaultPortalTheme,
+		PageMode: database.PortalPageStandard,
+		Errors:   map[string]string{},
+	}
 }
 
 // portalEditorFormFromRequest reads the submitted editor form.
@@ -152,7 +162,22 @@ func portalEditorFormFromRequest(r *http.Request) portalEditorForm {
 	form.HeaderName = strings.TrimSpace(r.PostFormValue("header_name"))
 	form.Theme = database.NormalizePortalTheme(r.PostFormValue("theme"))
 	form.CustomHTML = r.PostFormValue("custom_html")
+	// An unchecked radio simply does not appear in the body, so a missing value
+	// means the operator chose the default rather than that something was lost.
+	form.PageMode = database.NormalizePortalPageMode(r.PostFormValue("page_mode"))
+	form.FullHTML = r.PostFormValue("full_html")
 	return form
+}
+
+// firstLine trims a multi-line compiler error down to its first line, which is
+// the part that names the problem. A template error carries the offending source
+// on later lines, which would be dumped into the middle of the editor form.
+func firstLine(message string) string {
+	message = strings.TrimSpace(message)
+	if idx := strings.IndexByte(message, '\n'); idx >= 0 {
+		return strings.TrimSpace(message[:idx])
+	}
+	return message
 }
 
 // portalEditorPage backs the PORTAL page of the operator panel.
@@ -173,6 +198,9 @@ type portalEditorPage struct {
 	BackgroundUpdatedAt *time.Time
 	// Defaults exposes the limits to the template.
 	Defaults portalEditorDefaults
+	// Starter is the sample data the starter page is rendered with, so the
+	// operator sees a filled-in example rather than a wall of {{.Placeholders}}.
+	Starter portalFullData
 }
 
 type portalTheme struct {
@@ -209,7 +237,36 @@ func (h *Handler) newPortalEditorView(settings database.PortalSettings, form por
 			MaxHeaderRunes: database.MaxPortalHeaderName,
 			MaxHTMLBytes:   database.MaxPortalCustomHTML,
 			MaxImageBytes:  database.MaxPortalBackgroundBytes,
+			MaxFullBytes:   database.MaxPortalFullHTML,
 		},
+		Starter: samplePortalData(h.cfg.PortalName),
+	}
+}
+
+// samplePortalData fills the starter page with plausible values.
+//
+// The starter is inserted into the textarea as text, so it is rendered with
+// example data rather than blanks: an operator reading it should see what each
+// placeholder produces, not a page full of empty spots. .LoginAction stays a
+// plain path so the example cannot be copy-pasted into a live page and break a
+// login by pointing at a URL with no hotspot parameters on it.
+func samplePortalData(portalName string) portalFullData {
+	return portalFullData{
+		PortalName:  portalName,
+		MAC:         "D6:A8:AA:7A:70:E5",
+		IP:          "10.1.0.135",
+		RouterName:  "Ground floor",
+		RouterKnown: true,
+		LoginAction: template.URL(portalLoginPath),
+		LoggedIn:    false,
+		FormError:   "",
+		Notice:      "",
+		ExpiresAt:   "2026-12-31T23:59:00Z",
+		BannerURL:   portalBackgroundPath,
+		AdminPath:   "/admin",
+		LoginURL:    portalLoginPath,
+		Year:        2026,
+		Version:     "1.0.0",
 	}
 }
 
@@ -225,6 +282,8 @@ func (h *Handler) PortalEditor(w http.ResponseWriter, r *http.Request) {
 	form.HeaderName = settings.HeaderName
 	form.Theme = settings.Theme
 	form.CustomHTML = settings.CustomHTML
+	form.PageMode = settings.PageMode
+	form.FullHTML = settings.FullHTML
 
 	h.render(w, r, http.StatusOK, "portal_editor.html", h.newPortalEditorView(settings, form))
 }
@@ -255,14 +314,28 @@ func (h *Handler) PortalEditorSave(w http.ResponseWriter, r *http.Request) {
 		form.Errors["custom_html"] = fmt.Sprintf("The extra HTML is %d KB; the limit is %d KB. Shorten it, or move large images to the background upload.",
 			len(form.CustomHTML)/1024, database.MaxPortalCustomHTML/1024)
 	}
-	// Reject markup that would run code on the portal. The page is served with
-	// a script-src policy, so a <script> block would be blocked in the browser
-	// and the operator would wonder why their markup does nothing; failing at
-	// save time with an explanation is far clearer.
+	if len(form.FullHTML) > database.MaxPortalFullHTML {
+		form.Errors["full_html"] = fmt.Sprintf("The page is %d KB; the limit is %d KB.",
+			len(form.FullHTML)/1024, database.MaxPortalFullHTML/1024)
+	}
+
+	// A full page that cannot compile would silently fall back to the built-in
+	// layout, which is safe but confusing: the operator saves, sees no change,
+	// and has no idea why. Compile it here so the error names the line.
+	if strings.TrimSpace(form.FullHTML) != "" {
+		if _, err := template.New("check").Parse(form.FullHTML); err != nil {
+			form.Errors["full_html"] = "This page cannot be compiled: " + firstLine(err.Error())
+		}
+	}
+
+	// The custom block goes inside the built-in card, so it is held to the
+	// narrower rules: no scripts and no frames. The full page is a different
+	// contract - it is the whole document and may contain a countdown <script> -
+	// and is only bounded by the Content-Security-Policy.
 	lowered := strings.ToLower(form.CustomHTML)
 	for _, rule := range []struct{ needle, message string }{
-		{"<script", "Scripts are not allowed on the portal."},
-		{"</script", "Scripts are not allowed on the portal."},
+		{"<script", "Scripts are not allowed in the extra HTML block. Use the full-page mode for a page with JavaScript."},
+		{"</script", "Scripts are not allowed in the extra HTML block. Use the full-page mode for a page with JavaScript."},
 		{"javascript:", "javascript: links are not allowed."},
 		{"<iframe", "Iframes are not allowed: a walled-garden guest has no route to load them."},
 	} {
@@ -280,6 +353,8 @@ func (h *Handler) PortalEditorSave(w http.ResponseWriter, r *http.Request) {
 		Theme:      form.Theme,
 		HeaderName: form.HeaderName,
 		CustomHTML: form.CustomHTML,
+		PageMode:   form.PageMode,
+		FullHTML:   form.FullHTML,
 	}
 	if err := h.db.PortalSettings().Save(ctx, saved); err != nil {
 		if errors.Is(err, database.ErrPortalTheme) {
@@ -388,6 +463,8 @@ func (h *Handler) portalEditorFormError(w http.ResponseWriter, r *http.Request, 
 	form.HeaderName = settings.HeaderName
 	form.Theme = settings.Theme
 	form.CustomHTML = settings.CustomHTML
+	form.PageMode = settings.PageMode
+	form.FullHTML = settings.FullHTML
 	form.Errors["background"] = message
 
 	h.render(w, r, status, "portal_editor.html", h.newPortalEditorView(settings, form))
