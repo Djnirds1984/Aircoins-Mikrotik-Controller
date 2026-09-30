@@ -18,8 +18,8 @@
         {{.Stats.SessionsOpen}} client(s) connected</p>
     </div>
     <div class="actions">
-      <a class="btn" href="/">Dashboard</a>
-      <a class="btn" href="/vouchers">Vouchers</a>
+      <a class="btn" href="/">{{icon "gauge"}} Dashboard</a>
+      <a class="btn" href="/vouchers">{{icon "ticket"}} Vouchers</a>
     </div>
   </div>
 
@@ -96,19 +96,19 @@
             <label for="default_portal">Default portal device</label></span>
         </div>
         <div class="btn-row" style="margin-top:12px">
-          <button class="btn primary" type="submit">Save and test connection</button>
+          <button class="btn primary" type="submit">{{icon "check"}} Save and test connection</button>
         </div>
       </form>
     </div>
 
     <div class="card">
-      <h2>Inventory</h2>
+      <h2>{{icon "network"}} Inventory</h2>
       <p class="hint">Open a device to manage its live clients, IP bindings and vouchers.</p>
       {{if .Routers}}
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th>Name</th><th>Endpoint</th><th>Status</th><th class="num">Clients</th><th class="num">Vouchers</th><th></th></tr>
+            <tr><th>{{icon "router" "sm"}} Name</th><th>{{icon "link" "sm"}} Endpoint</th><th>{{icon "signal" "sm"}} Status</th><th class="num">{{icon "users" "sm"}} Clients</th><th class="num">{{icon "ticket" "sm"}} Vouchers</th><th></th></tr>
           </thead>
           <tbody>
           {{range .Routers}}
@@ -129,10 +129,10 @@
               <td class="num nowrap">
                 <a class="btn small" href="/routers/{{.Router.ID}}">Manage</a>
                 <details style="display:inline-block">
-                  <summary class="btn small danger">Delete</summary>
+                  <summary class="btn small danger">{{icon "chevron-down" "chev"}} Delete</summary>
                   <form method="post" action="/routers/{{.Router.ID}}/delete" style="margin-top:8px; text-align:right">
                     {{template "csrf" $}}
-                    <button class="btn small danger" type="submit">Confirm</button>
+                    <button class="btn small danger" type="submit">{{icon "trash"}} Confirm</button>
                   </form>
                 </details>
               </td>
@@ -142,7 +142,7 @@
         </table>
       </div>
       {{else}}
-        <div class="empty">No devices yet. Register your first MikroTik router on the left.</div>
+        <div class="empty">{{icon "inbox"}} No devices yet. Register your first MikroTik router on the left.</div>
       {{end}}
     </div>
   </section>

@@ -41,6 +41,13 @@ func TemplateFuncs() template.FuncMap {
 		// a submitted string value. The template language cannot compare an int
 		// with a string, so the option is rendered to text on both sides.
 		"printf": fmt.Sprintf,
+		// icon emits an inline SVG glyph for a semantic name from the iconPaths
+		// registry (see icons.go). The variadic class args let a template add
+		// size/modifier classes, supporting both `icon "wifi"` and
+		// `icon "wifi" "brand-icon"`.
+		"icon": func(name string, class ...string) template.HTML {
+			return renderIcon(name, strings.Join(class, " "))
+		},
 	}
 }
 

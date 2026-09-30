@@ -13,7 +13,7 @@
   {{template "flash" .}}
   <div class="page-head">
     <div><h1>Tools</h1><p class="sub">Host utilities for the Armbian, Ubuntu or Debian machine running this panel.</p></div>
-    <a class="btn" href="/tools">Refresh status</a>
+    <a class="btn" href="/tools">{{icon "refresh-cw"}} Refresh status</a>
   </div>
 
   {{if .InstallJob}}
@@ -28,7 +28,7 @@
 
   <section class="card">
     <div class="page-head" style="margin-bottom:12px">
-      <div><h2>ZeroTier status</h2><p class="sub">Local installation, service, identity and joined networks</p></div>
+      <div><h2>{{icon "signal" "sm"}} ZeroTier status</h2><p class="sub">Local installation, service, identity and joined networks</p></div>
       {{if .ZeroTier.Installed}}{{if .ZeroTier.Online}}<span class="badge green">online</span>{{else}}<span class="badge red">offline</span>{{end}}{{else}}<span class="badge slate">not installed</span>{{end}}
     </div>
 
@@ -40,7 +40,7 @@
       <div class="field"><span class="muted">Node ID</span><div class="mono">{{if .ZeroTier.NodeID}}{{.ZeroTier.NodeID}}{{else}}—{{end}}</div>{{if .ZeroTier.Version}}<small>Version {{.ZeroTier.Version}}</small>{{end}}</div>
     </div>
 
-    <h3 style="margin-top:20px">Joined networks</h3>
+    <h3 style="margin-top:20px">{{icon "network" "sm"}} Joined networks</h3>
     {{if .ZeroTier.Networks}}
     <div class="table-wrap">
       <table>
@@ -55,7 +55,7 @@
             <td>
               <form method="post" action="/tools/zerotier/leave">
                 {{template "csrf" $}}<input type="hidden" name="network_id" value="{{.ID}}">
-                <button class="btn danger" type="submit">Leave</button>
+                <button class="btn danger" type="submit">{{icon "log-out"}} Leave</button>
               </form>
             </td>
           </tr>
@@ -68,7 +68,7 @@
 
   <div class="form-grid" style="margin-top:16px">
     <section class="card">
-      <h2>ZeroTier installation</h2>
+      <h2>{{icon "wrench"}} ZeroTier installation</h2>
       <p class="hint">Official ZeroTier package for this panel host. The button is shown only when ZeroTier is not installed.</p>
       {{if .ZeroTier.Installed}}
         <div class="alert ok"><strong>Already installed.</strong> The local service is ready for network management.</div>
@@ -85,7 +85,7 @@
     </section>
 
     <section class="card">
-      <h2>Join ZeroTier network</h2>
+      <h2>{{icon "network"}} Join ZeroTier network</h2>
       <p class="hint">Add a 16-character network ID to link this host to a virtual network.</p>
       <form method="post" action="/tools/zerotier/join">
         {{template "csrf" .}}

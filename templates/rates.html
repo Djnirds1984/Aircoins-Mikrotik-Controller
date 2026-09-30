@@ -27,13 +27,13 @@
       <p class="sub">What a coin slot charge buys. Applied the moment a coin is inserted.</p>
     </div>
     <div class="actions">
-      <a class="btn" href="{{.AdminPath}}/portal/login" target="_blank" rel="noopener">Preview sign-in page</a>
+      <a class="btn" href="{{.AdminPath}}/portal/login" target="_blank" rel="noopener">{{icon "external-link"}}Preview sign-in page</a>
     </div>
   </div>
 
   {{if not .NodeReady}}
     <div class="alert warn">
-      <strong>The coin slot is not connected to this controller.</strong>
+      {{icon "alert-triangle"}}<strong>The coin slot is not connected to this controller.</strong>
       Set <span class="mono">COIN_NODE_TOKEN</span> and restart the service, otherwise the
       hardware endpoint refuses every report and no coin is ever counted. The prices
       below can still be configured now and will apply as soon as a node reports in.
@@ -86,7 +86,7 @@
           what the customer actually receives.
 <fieldset style="margin-top:16px; border:1px solid var(--line); border-radius:12px; padding:14px">
         <legend style="color:var(--muted); font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; padding:0 6px">
-          Wi-Fi time awarded
+          {{icon "clock" "sm"}}Wi-Fi time awarded
         </legend>
 
         {{/* Three separate dropdowns rather than one free-text field: an
@@ -127,7 +127,7 @@
 
       <div class="actions" style="margin-top:16px">
         <button class="btn primary" type="submit">
-          {{if .EditingID}}Save changes{{else}}Add rate{{end}}
+          {{icon "save"}}{{if .EditingID}}Save changes{{else}}Add rate{{end}}
         </button>
         {{if .EditingID}}
           <a class="btn" href="{{.AdminPath}}/rates">Cancel</a>
@@ -178,20 +178,20 @@
                 <form class="inline-form" method="post" action="{{$.AdminPath}}/rates/{{.ID}}/toggle">
                   {{template "csrf" $}}
                   <input type="hidden" name="active" value="">
-                  <button class="btn small" type="submit">Disable</button>
+                  <button class="btn small" type="submit">{{icon "ban"}}Disable</button>
                 </form>
                 {{else}}
                 <form class="inline-form" method="post" action="{{$.AdminPath}}/rates/{{.ID}}/toggle">
                   {{template "csrf" $}}
                   <input type="hidden" name="active" value="1">
-                  <button class="btn small" type="submit">Enable</button>
+                  <button class="btn small" type="submit">{{icon "power"}}Enable</button>
                 </form>
                 {{end}}
 
                 <form class="inline-form" method="post" action="{{$.AdminPath}}/rates/{{.ID}}/delete"
                       onsubmit="return confirm('Delete this rate permanently? Disable it instead if it has already been used.');">
                   {{template "csrf" $}}
-                  <button class="btn small danger" type="submit">Delete</button>
+                  <button class="btn small danger" type="submit">{{icon "trash"}}Delete</button>
                 </form>
               </td>
             </tr>

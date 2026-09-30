@@ -11,23 +11,23 @@
 <main class="wrap">
   <div class="page-head">
     <div>
-      <h1>Something went wrong</h1>
+      <h1>{{icon "alert-triangle"}} Something went wrong</h1>
       <p class="sub">{{.Message}}</p>
     </div>
     <div class="actions">
-      <a class="btn primary" href="/">Back to dashboard</a>
+      <a class="btn primary" href="/">{{icon "chevron-left"}} Back to dashboard</a>
     </div>
   </div>
 
   <section class="card">
-    <h2>{{.Title}}</h2>
+    <h2>{{icon "x-circle"}} {{.Title}}</h2>
     <p class="hint">The controller could not complete this page. The details below help the operator diagnose it.</p>
     {{if .Detail}}<p class="mono" style="word-break:break-word">{{.Detail}}</p>{{end}}
     <div class="btn-row">
-      <a class="btn" href="/">Dashboard</a>
-      <a class="btn" href="/routers">Routers</a>
-      <a class="btn" href="/vouchers">Vouchers</a>
-      <a class="btn" href="/sessions">Sessions</a>
+      <a class="btn" href="/">{{icon "gauge" "sm"}} Dashboard</a>
+      <a class="btn" href="/routers">{{icon "router" "sm"}} Routers</a>
+      <a class="btn" href="/vouchers">{{icon "ticket" "sm"}} Vouchers</a>
+      <a class="btn" href="/sessions">{{icon "users" "sm"}} Sessions</a>
     </div>
   </section>
 </main>

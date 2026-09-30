@@ -69,29 +69,29 @@ canvas#trafficCanvas{
       <p class="sub">Registered MikroTik hotspots, live clients and the prepaid voucher ledger.</p>
     </div>
     <div class="actions">
-      <a class="btn" href="{{.AdminPath}}/sessions?status=open">Live sessions</a>
-      <a class="btn primary" href="{{.AdminPath}}/routers">Manage routers</a>
+      <a class="btn" href="{{.AdminPath}}/sessions?status=open">{{icon "users"}} Live sessions</a>
+      <a class="btn primary" href="{{.AdminPath}}/routers">{{icon "router"}} Manage routers</a>
     </div>
   </div>
 
   <section class="grid cols-4">
     <div class="card stat">
-      <span class="label">Routers</span>
+      <div class="stat-head">{{icon "router"}}<span class="label">Routers</span></div>
       <span class="value">{{humanCount .Stats.RoutersTotal}}</span>
       <span class="meta">{{.Stats.RoutersOnline}} online · {{.Stats.RoutersOffline}} offline · {{.Stats.RoutersUnknown}} unknown</span>
     </div>
     <div class="card stat">
-      <span class="label">Active clients</span>
+      <div class="stat-head">{{icon "users"}}<span class="label">Active clients</span></div>
       <span class="value">{{humanCount .Stats.SessionsOpen}}</span>
       <span class="meta">tracked across all routers</span>
     </div>
     <div class="card stat">
-      <span class="label">Vouchers</span>
+      <div class="stat-head">{{icon "ticket"}}<span class="label">Vouchers</span></div>
       <span class="value">{{humanCount .Stats.Vouchers.Total}}</span>
       <span class="meta">{{.Stats.Vouchers.Unused}} unused · {{.Stats.Vouchers.Active}} active · {{.Stats.Vouchers.Used}} used</span>
     </div>
     <div class="card stat">
-      <span class="label">Redeemed value</span>
+      <div class="stat-head">{{icon "coins"}}<span class="label">Redeemed value</span></div>
       <span class="value">{{money .Stats.Vouchers.BilledCents}}</span>
       <span class="meta">of {{money .Stats.Vouchers.FaceValueCents}} issued · {{.Stats.Vouchers.Pushed}} provisioned on devices</span>
     </div>
@@ -99,7 +99,7 @@ canvas#trafficCanvas{
 
   <!-- Interface Traffic Graph -->
   <section class="card interface-graph-card">
-    <h2>Interface traffic monitor</h2>
+    <h2>{{icon "activity"}} Interface traffic monitor</h2>
     <p class="hint">Select a router and interface to view real-time traffic statistics.</p>
 
     <div class="interface-selector">
@@ -118,35 +118,35 @@ canvas#trafficCanvas{
 
     <div id="interfaceInfo" class="interface-info" style="display:none">
       <div class="stat">
-        <span class="label">Interface</span>
+        <span class="label">{{icon "signal" "sm"}} Interface</span>
         <span class="value" id="ifaceName">—</span>
       </div>
       <div class="stat">
-        <span class="label">Type</span>
+        <span class="label">{{icon "signal" "sm"}} Type</span>
         <span class="value" id="ifaceType">—</span>
       </div>
       <div class="stat">
-        <span class="label">MAC</span>
+        <span class="label">{{icon "signal" "sm"}} MAC</span>
         <span class="value mono" id="ifaceMAC">—</span>
       </div>
       <div class="stat">
-        <span class="label">MTU</span>
+        <span class="label">{{icon "signal" "sm"}} MTU</span>
         <span class="value" id="ifaceMTU">—</span>
       </div>
       <div class="stat">
-        <span class="label">RX (total)</span>
+        <span class="label">{{icon "activity" "sm"}} RX (total)</span>
         <span class="value" id="ifaceRx">—</span>
       </div>
       <div class="stat">
-        <span class="label">TX (total)</span>
+        <span class="label">{{icon "activity" "sm"}} TX (total)</span>
         <span class="value" id="ifaceTx">—</span>
       </div>
       <div class="stat">
-        <span class="label">RX rate</span>
+        <span class="label">{{icon "activity" "sm"}} RX rate</span>
         <span class="value" id="ifaceRxRate">—</span>
       </div>
       <div class="stat">
-        <span class="label">TX rate</span>
+        <span class="label">{{icon "activity" "sm"}} TX rate</span>
         <span class="value" id="ifaceTxRate">—</span>
       </div>
     </div>
@@ -170,15 +170,15 @@ canvas#trafficCanvas{
   </section>
 
   <section class="card" style="margin-top:16px">
-    <h2>Routers</h2>
+    <h2>{{icon "router"}} Routers</h2>
     <p class="hint">The status column reflects the last API connection attempt.</p>
     {{if .Routers}}
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
-            <th>Name</th><th>API endpoint</th><th>Status</th><th class="num">Clients</th>
-            <th class="num">Vouchers</th><th>Last seen</th><th></th>
+            <th>{{icon "router" "sm"}} Name</th><th>{{icon "link" "sm"}} API endpoint</th><th>{{icon "signal" "sm"}} Status</th><th class="num">{{icon "users" "sm"}} Clients</th>
+            <th class="num">{{icon "ticket" "sm"}} Vouchers</th><th>{{icon "clock" "sm"}} Last seen</th><th></th>
           </tr>
         </thead>
         <tbody>
@@ -201,12 +201,12 @@ canvas#trafficCanvas{
       </table>
     </div>
     {{else}}
-      <div class="empty">No routers registered yet. <a href="{{.AdminPath}}/routers">Add your first MikroTik device</a>.</div>
+      <div class="empty">{{icon "inbox"}} No routers registered yet. <a href="{{.AdminPath}}/routers">Add your first MikroTik device</a>.</div>
     {{end}}
   </section>
 
   <section class="card" style="margin-top:16px">
-    <h2>Live clients</h2>
+    <h2>{{icon "users"}} Live clients</h2>
     {{if .Sessions}}
     <div class="table-wrap">
       <table>
@@ -227,12 +227,12 @@ canvas#trafficCanvas{
       </table>
     </div>
     {{else}}
-      <div class="empty">No active hotspot clients tracked right now.</div>
+      <div class="empty">{{icon "inbox"}} No active hotspot clients tracked right now.</div>
     {{end}}
   </section>
 
   <section class="card" style="margin-top:16px">
-    <h2>Recent vouchers</h2>
+    <h2>{{icon "ticket"}} Recent vouchers</h2>
     {{if .Vouchers}}
     <div class="table-wrap">
       <table>
@@ -245,7 +245,7 @@ canvas#trafficCanvas{
       </table>
     </div>
     {{else}}
-      <div class="empty">No vouchers generated yet. <a href="{{.AdminPath}}/vouchers">Create the first batch</a>.</div>
+      <div class="empty">{{icon "inbox"}} No vouchers generated yet. <a href="{{.AdminPath}}/vouchers">Create the first batch</a>.</div>
     {{end}}
   </section>
 </main>

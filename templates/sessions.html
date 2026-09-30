@@ -53,8 +53,8 @@
         </div>
       </div>
       <div class="btn-row" style="margin-top:12px">
-        <button class="btn primary" type="submit">Apply filters</button>
-        <a class="btn" href="/sessions">Clear</a>
+        <button class="btn primary" type="submit">{{icon "filter"}}Apply filters</button>
+        <a class="btn" href="/sessions">{{icon "x"}}Clear</a>
       </div>
     </form>
   </section>
@@ -78,15 +78,15 @@
             <td class="mono">{{.MACAddress}}</td>
             <td class="num">{{humanBytes .TotalBytes}}</td>
             <td class="nowrap">{{durationLabel .Duration}}</td>
-            <td class="nowrap">{{if .Open}}<span class="badge green">open</span>{{else}}<span class="badge slate">closed</span>{{end}}</td>
+            <td class="nowrap">{{if .Open}}<span class="badge green">{{icon "check" "sm"}}open</span>{{else}}<span class="badge slate">{{icon "x" "sm"}}closed</span>{{end}}</td>
           </tr>
         {{end}}
         </tbody>
       </table>
     </div>
     <div class="btn-row" style="margin-top:12px">
-      {{if gt .PageNo 1}}<a class="btn" href="{{.PrevURL}}">Previous</a>{{end}}
-      {{if lt .PageNo .Pages}}<a class="btn" href="{{.NextURL}}">Next</a>{{end}}
+      {{if gt .PageNo 1}}<a class="btn" href="{{.PrevURL}}">{{icon "chevron-left"}}Previous</a>{{end}}
+      {{if lt .PageNo .Pages}}<a class="btn" href="{{.NextURL}}">{{icon "chevron-right"}}Next</a>{{end}}
     </div>
     {{else}}
       <div class="empty">No sessions match these filters yet.</div>

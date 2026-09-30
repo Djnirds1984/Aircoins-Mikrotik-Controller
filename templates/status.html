@@ -24,7 +24,7 @@
 <body class="portal"{{if .Branding.BackgroundURL}} style="background-image:linear-gradient(var(--bg-scrim),var(--bg-scrim)),url('{{.Branding.BackgroundURL}}');background-size:cover;background-position:center"{{end}}>
 <main class="portal-wrap portal-wide">
   <div class="portal-card">
-    <div class="brand"><span class="mark">A</span><span>{{.Branding.HeaderName}}</span></div>
+    <div class="brand"><span class="mark">{{icon "wifi" "brand-icon"}}</span><span>{{.Branding.HeaderName}}</span></div>
 
     {{if .Online}}
       <h1>Your session</h1>
@@ -32,7 +32,7 @@
 
       <div class="clocks">
         <div class="clock">
-          <div class="label">Time online</div>
+          <div class="label">{{icon "clock"}} Time online</div>
           {{/* Rendered server side so the value is right the instant the page
                loads; the script below keeps it ticking from there. */}}
           <div class="value" id="elapsed" data-seconds="{{.ElapsedSeconds}}">{{.Elapsed}}</div>
@@ -40,7 +40,7 @@
 
         {{if .HasAllowance}}
         <div class="clock">
-          <div class="label">Time remaining</div>
+          <div class="label">{{icon "clock"}} Time remaining</div>
           <div class="value" id="remaining" data-seconds="{{.RemainingSeconds}}">{{.Remaining}}</div>
         </div>
         {{end}}
@@ -56,15 +56,15 @@
       </dl>
 
       <div class="btn-row" style="margin-top:16px">
-        <a class="btn" href="{{.LoginURL}}">Refresh</a>
-        <a class="btn" href="/">Portal</a>
+        <a class="btn" href="{{.LoginURL}}">{{icon "refresh-cw"}} Refresh</a>
+        <a class="btn" href="/">{{icon "wifi"}} Portal</a>
       </div>
     {{else}}
       <h1>No active session</h1>
       <p class="sub">This device is not signed in to the hotspot at the moment.</p>
       <div class="clocks">
         <div class="clock spent">
-          <div class="label">Time online</div>
+          <div class="label">{{icon "clock"}} Time online</div>
           <div class="value">0D. 00HR. 00MIN. 00SEC.</div>
         </div>
       </div>
@@ -74,7 +74,7 @@
         shows your own session.
       </p>
       <div class="btn-row" style="margin-top:14px">
-        <a class="btn primary" href="{{.LoginURL}}">Sign in</a>
+        <a class="btn primary" href="{{.LoginURL}}">{{icon "log-out"}} Sign in</a>
       </div>
     {{end}}
   </div>

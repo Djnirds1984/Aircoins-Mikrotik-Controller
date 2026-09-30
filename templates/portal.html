@@ -10,7 +10,7 @@
 <body class="portal"{{if .Branding.BackgroundURL}} style="background-image:linear-gradient(var(--bg-scrim),var(--bg-scrim)),url('{{.Branding.BackgroundURL}}');background-size:cover;background-position:center"{{end}}>
 <main class="portal-wrap">
   <div class="portal-card">
-    <div class="brand"><span class="mark">A</span><span>{{.Branding.HeaderName}}</span></div>
+    <div class="brand"><span class="mark">{{icon "wifi" "brand-icon"}}</span><span>{{.Branding.HeaderName}}</span></div>
     <h1>{{if .Success}}You are online{{else}}Hotspot sign in{{end}}</h1>
     {{if .RouterKnown}}
       <p class="sub">Connected via <strong>{{.RouterName}}</strong></p>
@@ -19,7 +19,7 @@
     {{end}}
 
     {{if .Success}}
-      <div class="alert ok"><strong>Welcome online.</strong> Your session is active.</div>
+      <div class="alert ok">{{icon "check-circle"}} <strong>Welcome online.</strong> Your session is active.</div>
       {{if .Voucher}}
         <dl class="kv">
           <dt>Voucher</dt><dd class="mono">{{.Voucher.Code}}</dd>
@@ -29,17 +29,17 @@
       {{end}}
       {{if .Notice}}<p class="hint">{{.Notice}}</p>{{end}}
       <div class="btn-row" style="margin-top:12px">
-        <a class="btn primary" href="/portal/session">View session timer</a>
+        <a class="btn primary" href="/portal/session">{{icon "clock"}} View session timer</a>
       </div>
       {{if .RedirectTo}}
-        <p><a class="btn primary" href="{{.RedirectTo}}">Continue browsing</a></p>
+        <p><a class="btn primary" href="{{.RedirectTo}}">{{icon "external-link"}} Continue browsing</a></p>
       {{else if .FallbackLink}}
-        <p><a class="btn primary" href="{{.FallbackLink}}">Continue browsing</a></p>
+        <p><a class="btn primary" href="{{.FallbackLink}}">{{icon "external-link"}} Continue browsing</a></p>
       {{else}}
         <p class="hint">You can now open any website; this tab can be closed.</p>
       {{end}}
     {{else}}
-      {{if .FormError}}<div class="alert err">{{.FormError}}</div>{{end}}
+      {{if .FormError}}<div class="alert err">{{icon "x-circle"}} {{.FormError}}</div>{{end}}
       {{if .Notice}}<div class="alert warn">{{.Notice}}</div>{{end}}
 
       <form method="post" action="{{portalAction .Portal}}">
@@ -50,7 +50,7 @@
           <span class="muted" style="font-size:.78rem">Printed on your receipt or card.</span>
         </div>
         <div class="btn-row" style="margin-top:12px">
-          <button class="btn primary" type="submit">Connect with voucher</button>
+          <button class="btn primary" type="submit">{{icon "wifi"}} Connect with voucher</button>
         </div>
       </form>
 
@@ -82,7 +82,7 @@
       <div class="btn-row" style="margin-top:12px">
         <button class="btn" type="button" id="coin-open-btn"
                 aria-controls="coin-modal" aria-haspopup="dialog" aria-expanded="false">
-          Insert coin
+          {{icon "coins"}} Insert coin
         </button>
       </div>
       {{template "coinTab" .}}

@@ -102,7 +102,6 @@ body.kiosk{
 .kiosk-as{margin:6px 0 0; font-size:.8rem; color:var(--k-muted)}
 .kiosk-as b{color:var(--k-text); font-weight:700}
 </style>
-</head>
 <style>
 /* ---- the clock --------------------------------------------------------- */
 /* One unbroken line of tabular figures. A counter whose width changes every
@@ -153,6 +152,15 @@ body.kiosk{
   font-size:.66rem; font-weight:700; letter-spacing:.04em;
   text-transform:none; color:var(--k-muted);
 }
+/* Icons inside the kiosk are pinned to the hard-coded palette above rather than
+   left to inherit an admin token: each control sets its own colour and the
+   glyph's stroke is fixed to match, so it always contrasts with the kiosk
+   background. (The SVGs render stroke="currentColor"; these rules win because
+   CSS beats the presentation attribute.) */
+.kiosk-btn .icon{width:19px; height:19px}
+.kiosk-btn.grey .icon,.kiosk-voucher button .icon{stroke:var(--k-text)}
+.kiosk-btn.coin .icon{stroke:#04211f}
+.kiosk-btn.danger .icon{stroke:#fff}
 
 /* ---- voucher row ------------------------------------------------------- */
 .kiosk-voucher{display:flex; gap:8px}
@@ -176,7 +184,16 @@ body.kiosk{
 
 
 /* ---- the embedded coin tab, restyled for the kiosk --------------------- */
-.kiosk .coin{
+/* Scoped with :not(.kiosk-btn): the "Insert coin" action button carries the
+   same .coin class as this panel, so an unscoped `.kiosk .coin` also matches
+   the button. Being equal in specificity but later in source, it would override
+   the button's bright .kiosk-btn.coin gradient with the dark --k-panel
+   background (and reset background-image to none), leaving the dark #04211f
+   label + icon on a near-black button (~1.08:1 - invisible), plus leak the
+   panel's padding/radius onto it. The guard keeps this restyle on the panel
+   only. The design master captive_portal.html sidesteps it by naming its panel
+   .kiosk-coin instead of .coin. */
+.kiosk .coin:not(.kiosk-btn){
   margin-top:0; padding:14px 12px;
   background:var(--k-panel); border:1px solid var(--k-line); border-radius:14px;
 }
@@ -227,7 +244,7 @@ body.kiosk{
   box-shadow:0 10px 28px rgba(0,0,0,.5);
   font:inherit; padding:0;
 }
-.kiosk-chat svg{width:26px; height:26px; fill:currentColor}
+.kiosk-chat svg{width:26px; height:26px; fill:none; stroke:currentColor; stroke-width:2}
 .kiosk-chat:focus-visible{outline:2px solid var(--k-text); outline-offset:3px}
 .kiosk-pop{
   position:fixed; right:16px; bottom:82px; z-index:39;
@@ -349,7 +366,7 @@ body.kiosk{
            letting it fail silently. Drop the attribute once a promo flow
            exists. */}}
       <button class="kiosk-btn grey" type="button" data-soon>
-        Claim free time <span class="soon">(coming soon)</span>
+        {{icon "gift"}} Claim free time <span class="soon">(coming soon)</span>
       </button>
 
       {{/* The only action in the stack that is wired up. It opens the INSERT COIN
@@ -358,16 +375,16 @@ body.kiosk{
            so this button and the dialog cannot drift apart. */}}
       <button class="kiosk-btn coin" type="button" id="kiosk-coin-btn"
               aria-controls="coin-modal" aria-haspopup="dialog"
-              aria-expanded="false">Insert coin</button>
+              aria-expanded="false">{{icon "coins"}} Insert coin</button>
 
       <button class="kiosk-btn danger" type="button" data-soon>
-        Pause <span class="soon">(coming soon)</span>
+        {{icon "pause"}} Pause <span class="soon">(coming soon)</span>
       </button>
 
-      <button class="kiosk-btn grey" type="button" id="kiosk-redeem-btn">Redeem</button>
+      <button class="kiosk-btn grey" type="button" id="kiosk-redeem-btn">{{icon "ticket"}} Redeem</button>
 
       <button class="kiosk-btn grey" type="button" id="kiosk-rates-btn"
-              aria-controls="kiosk-rates" aria-expanded="false">Wi-Fi rates</button>
+              aria-controls="kiosk-rates" aria-expanded="false">{{icon "wifi"}} Wi-Fi rates</button>
     </div>
 
     {{/* Real data, not a decorative label: the configured rate is what actually
@@ -388,7 +405,7 @@ body.kiosk{
     <form method="post" action="{{portalAction .Portal}}" class="kiosk-voucher">
       <input id="voucher" name="voucher" autocomplete="off" autocapitalize="characters"
              spellcheck="false" placeholder="Voucher Here.." aria-label="Voucher code">
-      <button type="submit">Submit</button>
+      <button type="submit">{{icon "check"}} Submit</button>
     </form>
 
 
@@ -422,7 +439,7 @@ body.kiosk{
      panel that repeats the operator's own support line. */}}
 <button class="kiosk-chat" type="button" id="kiosk-chat" aria-expanded="false"
         aria-controls="kiosk-pop" aria-label="Help and support">
-  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3C6.9 3 3 6.6 3 11c0 2.4 1.2 4.6 3.2 6L5.4 21l4.3-2.1c.7.1 1.5.2 2.3.2 5.1 0 9-3.6 9-8S17.1 3 12 3zm1 13.5h-2v-2h2v2zm1.8-4.6c-.3.4-.8.6-1.3.6h-1v1.6h-2v-2.2c0-1.4 1-1.9 1.9-2.2.8-.3 1.4-.6 1.4-1.1 0-.4-.4-.7-.9-.7-.5 0-1 .3-1.3.8l-1.6-.8c.5-1 1.7-1.6 3-1.6 1.7 0 2.9 1 2.9 2.4 0 1-.5 1.5-1.1 2z"/></svg>
+  {{icon "help-circle"}}
 </button>
 <div class="kiosk-pop" id="kiosk-pop" hidden>
   <strong>Need help?</strong>

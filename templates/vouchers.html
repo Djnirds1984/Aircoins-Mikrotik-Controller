@@ -18,8 +18,8 @@
         {{.Stats.Used}} used · {{.Stats.Pushed}} provisioned on devices · redeemed value {{money .Stats.BilledCents}}</p>
     </div>
     <div class="actions">
-      <a class="btn" href="/vouchers/export.csv?status={{.Filter.Status}}&amp;batch={{.Filter.Batch}}&amp;q={{.Filter.Query}}&amp;router={{if .Filter.RouterID}}{{.Filter.RouterID}}{{end}}">Export CSV</a>
-      <a class="btn" href="/routers">Routers</a>
+      <a class="btn" href="/vouchers/export.csv?status={{.Filter.Status}}&amp;batch={{.Filter.Batch}}&amp;q={{.Filter.Query}}&amp;router={{if .Filter.RouterID}}{{.Filter.RouterID}}{{end}}">{{icon "download"}}Export CSV</a>
+      <a class="btn" href="/routers">{{icon "router"}}Routers</a>
     </div>
   </div>
 
@@ -101,7 +101,7 @@
           <input type="checkbox" name="push" value="1"{{if .Form.Push}} checked{{end}}>
           <span>Provision on the router right away (keys then work even if this controller is offline)</span>
         </label>
-        <button class="btn primary" type="submit">Generate vouchers</button>
+        <button class="btn primary" type="submit">{{icon "plus"}}Generate vouchers</button>
       </div>
     </form>
   </section>
@@ -145,8 +145,8 @@
         </div>
       </div>
       <div class="btn-row" style="margin-top:12px">
-        <button class="btn primary" type="submit">Apply filters</button>
-        <a class="btn" href="/vouchers">Clear</a>
+        <button class="btn primary" type="submit">{{icon "filter"}}Apply filters</button>
+        <a class="btn" href="/vouchers">{{icon "x"}}Clear</a>
       </div>
     </form>
   </section>
@@ -166,8 +166,8 @@
       </table>
     </div>
     <div class="btn-row" style="margin-top:12px">
-      {{if gt .PageNo 1}}<a class="btn" href="{{.PrevURL}}">Previous</a>{{end}}
-      {{if lt .PageNo .Pages}}<a class="btn" href="{{.NextURL}}">Next</a>{{end}}
+      {{if gt .PageNo 1}}<a class="btn" href="{{.PrevURL}}">{{icon "chevron-left"}}Previous</a>{{end}}
+      {{if lt .PageNo .Pages}}<a class="btn" href="{{.NextURL}}">{{icon "chevron-right"}}Next</a>{{end}}
     </div>
     {{else}}
       <div class="empty">No vouchers match these filters. Generate the first batch above.</div>
@@ -185,7 +185,7 @@
       <input type="hidden" name="back" value="{{$.Back}}">
       <span class="mono">{{.}}</span>
       <label class="field check" style="margin-left:8px"><input type="checkbox" name="only_unused" value="1" checked><span>unused only</span></label>
-      <button class="btn small danger" type="submit">Delete</button>
+      <button class="btn small danger" type="submit">{{icon "trash"}}Delete</button>
     </form>
     {{end}}
   </section>

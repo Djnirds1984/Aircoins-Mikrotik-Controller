@@ -18,7 +18,7 @@
       <p class="sub">How the captive portal looks to your guests. Changes apply on their next page load.</p>
     </div>
     <div class="actions">
-      <a class="btn" href="/portal/login" target="_blank" rel="noopener">Preview sign-in page</a>
+      <a class="btn" href="/portal/login" target="_blank" rel="noopener">{{icon "external-link"}} Preview sign-in page</a>
     </div>
   </div>
 
@@ -26,7 +26,7 @@
     {{template "csrf" .}}
 
     <section class="card">
-      <h2>Theme</h2>
+      <h2>{{icon "paintbrush"}} Theme</h2>
       <p class="hint">Pick the colours of the sign-in page your guests see.</p>
       {{with .Form.Errors.theme}}<div class="alert err">{{.}}</div>{{end}}
       <div class="theme-grid">
@@ -86,8 +86,8 @@
         point — it is a working sign-in page wired to your hotspot.
       </p>
       <div class="btn-row" style="margin-bottom:12px">
-        <button class="btn small" type="button" onclick="document.getElementById('full_html').value=document.getElementById('starter').value;document.getElementById('full_html').focus()">Insert the starter page</button>
-        <a class="btn small" href="/portal/login" target="_blank" rel="noopener">Preview the live page</a>
+        <button class="btn small" type="button" onclick="document.getElementById('full_html').value=document.getElementById('starter').value;document.getElementById('full_html').focus()">{{icon "plus"}} Insert the starter page</button>
+        <a class="btn small" href="/portal/login" target="_blank" rel="noopener">{{icon "external-link"}} Preview the live page</a>
       </div>
       <div class="field">
         <label for="full_html">HTML</label>
@@ -101,7 +101,7 @@
       </div>
 
       <details class="editor" style="margin-top:14px">
-        <summary>Values you can use</summary>
+        <summary>{{icon "chevron-down" "chev"}} Values you can use</summary>
         <p class="hint" style="margin-top:10px">
           These are substituted when the page is served. Anything the controller
           fills in is escaped, so a MAC address or router name cannot break out
@@ -153,7 +153,7 @@
     </section>
 
     <div class="btn-row" style="margin-top:16px">
-      <button class="btn primary" type="submit">Save appearance</button>
+      <button class="btn primary" type="submit">{{icon "save"}} Save appearance</button>
       <a class="btn" href="{{.AdminPath}}/portal-editor">Discard changes</a>
     </div>
   </form>
@@ -228,7 +228,7 @@
       </dl>
       <form class="inline-form" method="post" action="{{.AdminPath}}/portal-editor/background/delete" style="margin-top:12px">
         {{template "csrf" .}}
-        <button class="btn danger" type="submit">Remove background</button>
+        <button class="btn danger" type="submit">{{icon "trash"}} Remove background</button>
       </form>
     {{else}}
       <div class="empty">No background image. The portal uses the plain theme background.</div>
@@ -245,7 +245,7 @@
         </span>
       </div>
       <div class="btn-row" style="margin-top:12px">
-        <button class="btn primary" type="submit">Upload background</button>
+        <button class="btn primary" type="submit">{{icon "upload"}} Upload background</button>
       </div>
     </form>
   </section>

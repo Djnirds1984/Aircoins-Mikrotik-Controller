@@ -19,7 +19,7 @@
     </div>
   </div>
   <section class="card">
-    <h2>Choose a device</h2>
+    <h2>{{icon "router"}} Choose a device</h2>
     {{if .Routers}}
     <p class="hint">The Network tab configures one router at a time, because every hotspot menu belongs to a single device.</p>
     <div class="table-wrap">
@@ -43,7 +43,7 @@
       </table>
     </div>
     {{else}}
-    <div class="empty">No routers registered yet. <a href="/routers">Add a MikroTik device</a> first, then come back to configure its hotspot.</div>
+    <div class="empty">{{icon "inbox"}} No routers registered yet. <a href="/routers">Add a MikroTik device</a> first, then come back to configure its hotspot.</div>
     {{end}}
   </section>
 {{else}}
@@ -63,21 +63,21 @@
 
   {{if not .Live}}
   <div class="alert warn">
-    <strong>{{.Router.Name}} is not answering the API.</strong> {{.LiveHint}}
+    {{icon "alert-triangle"}} <strong>{{.Router.Name}} is not answering the API.</strong> {{.LiveHint}}
     <div class="muted" style="font-size:.82rem; margin-top:4px">Device reported: {{.LiveError}}</div>
   </div>
   {{end}}
 
   {{if .Warnings}}
   <div class="alert warn">
-    <strong>Some menus could not be read.</strong>
+    {{icon "alert-triangle"}} <strong>Some menus could not be read.</strong>
     <ul class="notice-list">{{range .Warnings}}<li>{{.}}</li>{{end}}</ul>
   </div>
   {{end}}
 
   <div class="pill-row">
     {{range .Tabs}}
-    <a href="/network/{{$.Router.ID}}?tab={{.}}"{{if eq . $.Tab}} class="active"{{end}}>{{.Label}} <span class="badge slate">{{$.CountFor .}}</span></a>
+    <a href="/network/{{$.Router.ID}}?tab={{.}}"{{if eq . $.Tab}} class="active"{{end}}>{{icon .Icon}} {{.Label}} <span class="badge slate">{{$.CountFor .}}</span></a>
     {{end}}
   </div>
   <p class="hint muted">{{.Tab.Hint}}</p>
@@ -85,16 +85,16 @@
 {{if eq .Tab "servers"}}
   {{$install := .InstallerForm}}
   <section class="card">
-    <h2>Hotspot installer</h2>
+    <h2>{{icon "wrench"}} Hotspot installer</h2>
     <p class="hint">Runs the MikroTik <span class="mono">/ip hotspot setup</span> flow: address, pool, DHCP, NAT, DNS, server profile, hotspot server and local administrator. Existing named objects are reused.</p>
     {{if .InstallerSteps}}
       <div class="alert {{if .InstallerError}}err{{else}}ok{{end}}">
-        {{if .InstallerError}}<strong>Installation stopped.</strong> RouterOS reported: {{.InstallerError}}{{else}}<strong>Hotspot installation completed.</strong> The commands below were accepted by RouterOS.{{end}}
+        {{if .InstallerError}}{{icon "alert-triangle"}} <strong>Installation stopped.</strong> RouterOS reported: {{.InstallerError}}{{else}}{{icon "check-circle"}} <strong>Hotspot installation completed.</strong> The commands below were accepted by RouterOS.{{end}}
       </div>
       <ul class="notice-list">{{range .InstallerSteps}}<li>{{.}}</li>{{end}}</ul>
     {{end}}
     <details class="editor"{{if or $install.Errors .InstallerSteps .InstallerError}} open{{end}}>
-      <summary>{{if .InstallerSteps}}Hotspot installer result{{else}}Run Hotspot installer{{end}}</summary>
+      <summary>{{icon "chevron-down" "chev"}} {{if .InstallerSteps}}Hotspot installer result{{else}}Run Hotspot installer{{end}}</summary>
       <form method="post" action="/network/{{$.Router.ID}}/hotspot/install">
         {{template "csrf" $}}
         <h3>Network</h3>
@@ -130,13 +130,13 @@
           <div class="field"><label for="install-admin-user">Username</label><input id="install-admin-user" name="admin_user" value="{{$install.AdminUser}}" required>{{with $install.Errors.admin_user}}<span class="error">{{.}}</span>{{end}}</div>
           <div class="field"><label for="install-admin-password">Password</label><input id="install-admin-password" name="admin_password" type="password" autocomplete="new-password" required><small>Used only when the account does not exist.</small>{{with $install.Errors.admin_password}}<span class="error">{{.}}</span>{{end}}</div>
         </div>
-        <div class="actions"><button class="btn primary" type="submit">Install Hotspot</button></div>
+        <div class="actions"><button class="btn primary" type="submit">{{icon "wrench"}} Install Hotspot</button></div>
       </form>
     </details>
   </section>
 
   <section class="card" style="margin-top:16px">
-    <h2>Hotspot servers <span class="badge slate">{{len .Servers}}</span></h2>
+    <h2>{{icon "router"}} Hotspot servers <span class="badge slate">{{len .Servers}}</span></h2>
     <p class="hint">/ip/hotspot — every server binds one or more interfaces and decides how the clients on them sign in.</p>
     {{if .Servers}}
     <div class="table-wrap">
@@ -164,15 +164,15 @@
               {{if .ProxyStatus}}<div class="muted" style="font-size:.72rem">proxy {{.ProxyStatus}}</div>{{end}}
             </td>
             <td class="num nowrap">
-              <a class="btn small" href="/network/{{$.Router.ID}}?tab=servers&edit={{.ID}}">Edit</a>
+              <a class="btn small" href="/network/{{$.Router.ID}}?tab=servers&edit={{.ID}}">{{icon "pencil"}} Edit</a>
               <form class="inline-form" method="post" action="/network/{{$.Router.ID}}/servers/{{.ID}}/toggle">
                 {{template "csrf" $}}
                 <input type="hidden" name="disabled" value="{{if .Disabled}}0{{else}}1{{end}}">
-                <button class="btn small" type="submit">{{if .Disabled}}Enable{{else}}Disable{{end}}</button>
+                <button class="btn small" type="submit">{{if .Disabled}}{{icon "power"}} Enable{{else}}{{icon "ban"}} Disable{{end}}</button>
               </form>
               <form class="inline-form" method="post" action="/network/{{$.Router.ID}}/servers/{{.ID}}/delete">
                 {{template "csrf" $}}
-                <button class="btn small danger" type="submit">Delete</button>
+                <button class="btn small danger" type="submit">{{icon "trash"}} Delete</button>
               </form>
             </td>
           </tr>
@@ -181,7 +181,7 @@
       </table>
     </div>
     {{else}}
-    <div class="empty">No hotspot server on this device yet.</div>
+    <div class="empty">{{icon "inbox"}} No hotspot server on this device yet.</div>
     {{end}}
   </section>
   <section class="card" style="margin-top:16px">
@@ -189,7 +189,7 @@
     {{/* A failed submit must reopen the editor or the field errors below are
          invisible: .Editing only covers edits, never a rejected create. */}}
     <details class="editor"{{if or .Editing $form.Errors}} open{{end}}>
-      <summary>{{if .Editing}}Edit hotspot server <span class="mono">{{.Editing}}</span>{{else}}Add a hotspot server{{end}}</summary>
+      <summary>{{icon "chevron-down" "chev"}} {{if .Editing}}Edit hotspot server <span class="mono">{{.Editing}}</span>{{else}}Add a hotspot server{{end}}</summary>
       <form method="post" action="/network/{{$.Router.ID}}/servers{{if $.Editing}}/{{$.Editing}}{{end}}">
         {{template "csrf" $}}
         <div class="form-grid">
@@ -247,7 +247,7 @@
           </div>
         </div>
         <div class="btn-row" style="margin-top:12px">
-          <button class="btn primary" type="submit">{{if .Editing}}Save server{{else}}Create server{{end}}</button>
+          <button class="btn primary" type="submit">{{if .Editing}}{{icon "save"}} Save server{{else}}{{icon "plus"}} Create server{{end}}</button>
           {{if .Editing}}<a class="btn" href="/network/{{.Router.ID}}?tab=servers">Cancel</a>{{end}}
         </div>
       </form>
@@ -257,7 +257,7 @@
   <datalist id="pool-options">{{range .Pools}}<option value="{{.}}"></option>{{end}}</datalist>
 {{else if eq .Tab "server-profiles"}}
   <section class="card">
-    <h2>Server profiles <span class="badge slate">{{len .ServerProfiles}}</span></h2>
+    <h2>{{icon "settings"}} Server profiles <span class="badge slate">{{len .ServerProfiles}}</span></h2>
     <p class="hint">/ip/hotspot/profile — the address, DNS name and login methods every hotspot server using this profile advertises to its clients.</p>
     {{if .ServerProfiles}}
     <div class="table-wrap">
@@ -294,10 +294,10 @@
               {{if .TrialUptimeLimit}}<div class="muted" style="font-size:.72rem">trial {{.TrialUptimeLimit}}</div>{{end}}
             </td>
             <td class="num nowrap">
-              <a class="btn small" href="/network/{{$.Router.ID}}?tab=server-profiles&edit={{.ID}}">Edit</a>
+              <a class="btn small" href="/network/{{$.Router.ID}}?tab=server-profiles&edit={{.ID}}">{{icon "pencil"}} Edit</a>
               <form class="inline-form" method="post" action="/network/{{$.Router.ID}}/server-profiles/{{.ID}}/delete">
                 {{template "csrf" $}}
-                <button class="btn small danger" type="submit">Delete</button>
+                <button class="btn small danger" type="submit">{{icon "trash"}} Delete</button>
               </form>
             </td>
           </tr>
@@ -306,13 +306,13 @@
       </table>
     </div>
     {{else}}
-    <div class="empty">No server profile on this device yet.</div>
+    <div class="empty">{{icon "inbox"}} No server profile on this device yet.</div>
     {{end}}
   </section>
   <section class="card" style="margin-top:16px">
     {{$form := .ServerProfileForm}}
     <details class="editor"{{if .Editing}} open{{end}}>
-      <summary>{{if .Editing}}Edit server profile <span class="mono">{{.Editing}}</span>{{else}}Add a server profile{{end}}</summary>
+      <summary>{{icon "chevron-down" "chev"}} {{if .Editing}}Edit server profile <span class="mono">{{.Editing}}</span>{{else}}Add a server profile{{end}}</summary>
       <form method="post" action="/network/{{$.Router.ID}}/server-profiles{{if $.Editing}}/{{$.Editing}}{{end}}">
         {{template "csrf" $}}
         <div class="form-grid">
@@ -459,7 +459,7 @@
           </div>
         </div>
         <div class="btn-row" style="margin-top:12px">
-          <button class="btn primary" type="submit">{{if .Editing}}Save profile{{else}}Create profile{{end}}</button>
+          <button class="btn primary" type="submit">{{if .Editing}}{{icon "save"}} Save profile{{else}}{{icon "plus"}} Create profile{{end}}</button>
           {{if .Editing}}<a class="btn" href="/network/{{.Router.ID}}?tab=server-profiles">Cancel</a>{{end}}
         </div>
       </form>
@@ -467,7 +467,7 @@
   </section>
 {{else if eq .Tab "user-profiles"}}
   <section class="card">
-    <h2>User profiles <span class="badge slate">{{len .UserProfiles}}</span></h2>
+    <h2>{{icon "users"}} User profiles <span class="badge slate">{{len .UserProfiles}}</span></h2>
     <p class="hint">/ip/hotspot/user/profile — the per login limits a hotspot user or voucher is provisioned onto: devices per login, speed, volume and the scripts around the session.</p>
     {{if .UserProfiles}}
     <div class="table-wrap">
@@ -503,10 +503,10 @@
             </td>
             <td>{{if .IsDefault}}<span class="badge slate">built in</span>{{else}}<span class="badge green">custom</span>{{end}}</td>
             <td class="num nowrap">
-              <a class="btn small" href="/network/{{$.Router.ID}}?tab=user-profiles&edit={{.ID}}">Edit</a>
+              <a class="btn small" href="/network/{{$.Router.ID}}?tab=user-profiles&edit={{.ID}}">{{icon "pencil"}} Edit</a>
               <form class="inline-form" method="post" action="/network/{{$.Router.ID}}/user-profiles/{{.ID}}/delete">
                 {{template "csrf" $}}
-                <button class="btn small danger" type="submit">Delete</button>
+                <button class="btn small danger" type="submit">{{icon "trash"}} Delete</button>
               </form>
             </td>
           </tr>
@@ -515,13 +515,13 @@
       </table>
     </div>
     {{else}}
-    <div class="empty">No user profile on this device yet. Vouchers need at least one to be provisioned onto.</div>
+    <div class="empty">{{icon "inbox"}} No user profile on this device yet. Vouchers need at least one to be provisioned onto.</div>
     {{end}}
   </section>
   <section class="card" style="margin-top:16px">
     {{$form := .UserProfileForm}}
     <details class="editor"{{if .Editing}} open{{end}}>
-      <summary>{{if .Editing}}Edit user profile <span class="mono">{{.Editing}}</span>{{else}}Add a user profile{{end}}</summary>
+      <summary>{{icon "chevron-down" "chev"}} {{if .Editing}}Edit user profile <span class="mono">{{.Editing}}</span>{{else}}Add a user profile{{end}}</summary>
       <form method="post" action="/network/{{$.Router.ID}}/user-profiles{{if $.Editing}}/{{$.Editing}}{{end}}">
         {{template "csrf" $}}
         <div class="form-grid">
@@ -665,7 +665,7 @@
           </div>
         </div>
         <div class="btn-row" style="margin-top:12px">
-          <button class="btn primary" type="submit">{{if .Editing}}Save profile{{else}}Create profile{{end}}</button>
+          <button class="btn primary" type="submit">{{if .Editing}}{{icon "save"}} Save profile{{else}}{{icon "plus"}} Create profile{{end}}</button>
           {{if .Editing}}<a class="btn" href="/network/{{.Router.ID}}?tab=user-profiles">Cancel</a>{{end}}
         </div>
       </form>
@@ -677,7 +677,7 @@
   </datalist>
 {{else if eq .Tab "walled-garden"}}
   <section class="card">
-    <h2>Walled garden <span class="badge slate">{{len .WalledGarden}}</span></h2>
+    <h2>{{icon "shield"}} Walled garden <span class="badge slate">{{len .WalledGarden}}</span></h2>
     <p class="hint">/ip/hotspot/walled-garden — sites a client may reach before signing in: a payment page, a carrier portal or a bank.</p>
     {{if .WalledGarden}}
     <div class="table-wrap">
@@ -707,15 +707,15 @@
               {{if .Allows}}<div class="muted" style="font-size:.72rem">allows</div>{{else}}<div class="muted" style="font-size:.72rem">denies</div>{{end}}
             </td>
             <td class="num nowrap">
-              <a class="btn small" href="/network/{{$.Router.ID}}?tab=walled-garden&edit={{.ID}}">Edit</a>
+              <a class="btn small" href="/network/{{$.Router.ID}}?tab=walled-garden&edit={{.ID}}">{{icon "pencil"}} Edit</a>
               <form class="inline-form" method="post" action="/network/{{$.Router.ID}}/walled-garden/{{.ID}}/toggle">
                 {{template "csrf" $}}
                 <input type="hidden" name="disabled" value="{{if .Disabled}}0{{else}}1{{end}}">
-                <button class="btn small" type="submit">{{if .Disabled}}Enable{{else}}Disable{{end}}</button>
+                <button class="btn small" type="submit">{{if .Disabled}}{{icon "power"}} Enable{{else}}{{icon "ban"}} Disable{{end}}</button>
               </form>
               <form class="inline-form" method="post" action="/network/{{$.Router.ID}}/walled-garden/{{.ID}}/delete">
                 {{template "csrf" $}}
-                <button class="btn small danger" type="submit">Delete</button>
+                <button class="btn small danger" type="submit">{{icon "trash"}} Delete</button>
               </form>
             </td>
           </tr>
@@ -724,13 +724,13 @@
       </table>
     </div>
     {{else}}
-    <div class="empty">No walled garden rule on this device. Clients can only reach the login portal until you add one.</div>
+    <div class="empty">{{icon "inbox"}} No walled garden rule on this device. Clients can only reach the login portal until you add one.</div>
     {{end}}
   </section>
   <section class="card" style="margin-top:16px">
     {{$form := .WalledGardenForm}}
     <details class="editor"{{if .Editing}} open{{end}}>
-      <summary>{{if .Editing}}Edit walled garden rule <span class="mono">{{.Editing}}</span>{{else}}Add a walled garden rule{{end}}</summary>
+      <summary>{{icon "chevron-down" "chev"}} {{if .Editing}}Edit walled garden rule <span class="mono">{{.Editing}}</span>{{else}}Add a walled garden rule{{end}}</summary>
       <form method="post" action="/network/{{$.Router.ID}}/walled-garden{{if $.Editing}}/{{$.Editing}}{{end}}">
         {{template "csrf" $}}
         <div class="form-grid">
@@ -786,7 +786,7 @@
         </div>
         {{with $form.Errors.method}}<span class="error">{{.}}</span>{{end}}
         <div class="btn-row" style="margin-top:12px">
-          <button class="btn primary" type="submit">{{if .Editing}}Save rule{{else}}Create rule{{end}}</button>
+          <button class="btn primary" type="submit">{{if .Editing}}{{icon "save"}} Save rule{{else}}{{icon "plus"}} Create rule{{end}}</button>
           {{if .Editing}}<a class="btn" href="/network/{{.Router.ID}}?tab=walled-garden">Cancel</a>{{end}}
         </div>
       </form>
@@ -794,7 +794,7 @@
   </section>
 {{else if eq .Tab "walled-garden-ip"}}
   <section class="card">
-    <h2>Walled garden IP <span class="badge slate">{{len .WalledGardenIP}}</span></h2>
+    <h2>{{icon "network"}} Walled garden IP <span class="badge slate">{{len .WalledGardenIP}}</span></h2>
     <p class="hint">/ip/hotspot/walled-garden/ip — address and protocol rules evaluated before the login check.</p>
     {{if .WalledGardenIP}}
     <div class="table-wrap">
@@ -823,15 +823,15 @@
             <td>{{if .Allows}}<span class="badge green">{{.Action}}</span>{{else}}<span class="badge red">{{.Action}}</span>{{end}}</td>
             <td>{{if .Disabled}}<span class="badge slate">disabled</span>{{else}}<span class="badge green">enabled</span>{{end}}</td>
             <td class="num nowrap">
-              <a class="btn small" href="/network/{{$.Router.ID}}?tab=walled-garden-ip&edit={{.ID}}">Edit</a>
+              <a class="btn small" href="/network/{{$.Router.ID}}?tab=walled-garden-ip&edit={{.ID}}">{{icon "pencil"}} Edit</a>
               <form class="inline-form" method="post" action="/network/{{$.Router.ID}}/walled-garden-ip/{{.ID}}/toggle">
                 {{template "csrf" $}}
                 <input type="hidden" name="disabled" value="{{if .Disabled}}0{{else}}1{{end}}">
-                <button class="btn small" type="submit">{{if .Disabled}}Enable{{else}}Disable{{end}}</button>
+                <button class="btn small" type="submit">{{if .Disabled}}{{icon "power"}} Enable{{else}}{{icon "ban"}} Disable{{end}}</button>
               </form>
               <form class="inline-form" method="post" action="/network/{{$.Router.ID}}/walled-garden-ip/{{.ID}}/delete">
                 {{template "csrf" $}}
-                <button class="btn small danger" type="submit">Delete</button>
+                <button class="btn small danger" type="submit">{{icon "trash"}} Delete</button>
               </form>
             </td>
           </tr>
@@ -840,13 +840,13 @@
       </table>
     </div>
     {{else}}
-    <div class="empty">No walled garden IP rule on this device.</div>
+    <div class="empty">{{icon "inbox"}} No walled garden IP rule on this device.</div>
     {{end}}
   </section>
   <section class="card" style="margin-top:16px">
     {{$form := .WalledGardenIPForm}}
     <details class="editor"{{if .Editing}} open{{end}}>
-      <summary>{{if .Editing}}Edit IP rule <span class="mono">{{.Editing}}</span>{{else}}Add a walled garden IP rule{{end}}</summary>
+      <summary>{{icon "chevron-down" "chev"}} {{if .Editing}}Edit IP rule <span class="mono">{{.Editing}}</span>{{else}}Add a walled garden IP rule{{end}}</summary>
       <form method="post" action="/network/{{$.Router.ID}}/walled-garden-ip{{if $.Editing}}/{{$.Editing}}{{end}}">
         {{template "csrf" $}}
         <div class="form-grid">
@@ -909,7 +909,7 @@
           </div>
         </div>
         <div class="btn-row" style="margin-top:12px">
-          <button class="btn primary" type="submit">{{if .Editing}}Save IP rule{{else}}Create IP rule{{end}}</button>
+          <button class="btn primary" type="submit">{{if .Editing}}{{icon "save"}} Save IP rule{{else}}{{icon "plus"}} Create IP rule{{end}}</button>
           {{if .Editing}}<a class="btn" href="/network/{{.Router.ID}}?tab=walled-garden-ip">Cancel</a>{{end}}
         </div>
       </form>
@@ -917,7 +917,7 @@
   </section>
 {{else if eq .Tab "pools"}}
   <section class="card">
-    <h2>IP pools <span class="badge slate">{{len .PoolRows}}</span></h2>
+    <h2>{{icon "signal"}} IP pools <span class="badge slate">{{len .PoolRows}}</span></h2>
     <p class="hint">/ip/pool — ranges leased out by the hotspot, DHCP and PPPoE servers. Created below; edited on the device so the used portion stays visible.</p>
     {{if .PoolRows}}
     <div class="table-wrap">
@@ -938,13 +938,13 @@
       </table>
     </div>
     {{else}}
-    <div class="empty">No IP pool on this device yet. Hotspot address pools are picked from this table.</div>
+    <div class="empty">{{icon "inbox"}} No IP pool on this device yet. Hotspot address pools are picked from this table.</div>
     {{end}}
   </section>
   <section class="card" style="margin-top:16px">
     {{$form := .PoolForm}}
     <details class="editor" open>
-      <summary>Add an IP pool</summary>
+      <summary>{{icon "chevron-down" "chev"}} Add an IP pool</summary>
       <form method="post" action="/network/{{$.Router.ID}}/pools">
         {{template "csrf" $}}
         <div class="form-grid">
@@ -970,7 +970,7 @@
           </div>
         </div>
         <div class="btn-row" style="margin-top:12px">
-          <button class="btn primary" type="submit">Create pool</button>
+          <button class="btn primary" type="submit">{{icon "plus"}} Create pool</button>
         </div>
       </form>
     </details>
@@ -978,7 +978,7 @@
   <datalist id="pool-options">{{range .Pools}}<option value="{{.}}"></option>{{end}}</datalist>
 {{else if eq .Tab "vlans"}}
   <section class="card">
-    <h2>VLANs <span class="badge slate">{{len .VLANs}}</span></h2>
+    <h2>{{icon "network"}} VLANs <span class="badge slate">{{len .VLANs}}</span></h2>
     <p class="hint">/interface/vlan — every entry is one VLAN interface: a single VLAN ID on a parent interface, a bridge such as bridge1 or a physical port such as ether5. Create one entry per VLAN.</p>
     {{if .VLANs}}
     <div class="table-wrap">
@@ -1005,13 +1005,13 @@
       </table>
     </div>
     {{else}}
-    <div class="empty">No VLAN interface on this device yet.</div>
+    <div class="empty">{{icon "inbox"}} No VLAN interface on this device yet.</div>
     {{end}}
   </section>
   <section class="card" style="margin-top:16px">
     {{$form := .VLANForm}}
     <details class="editor"{{if $form.Errors}} open{{end}}>
-      <summary>Add a VLAN interface</summary>
+      <summary>{{icon "chevron-down" "chev"}} Add a VLAN interface</summary>
       <form method="post" action="/network/{{$.Router.ID}}/vlans">
         {{template "csrf" $}}
         <div class="form-grid">
@@ -1044,7 +1044,7 @@
           </div>
         </div>
         <div class="btn-row" style="margin-top:12px">
-          <button class="btn primary" type="submit">Create VLAN interface</button>
+          <button class="btn primary" type="submit">{{icon "plus"}} Create VLAN interface</button>
         </div>
       </form>
     </details>

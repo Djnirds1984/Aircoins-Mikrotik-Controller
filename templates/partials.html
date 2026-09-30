@@ -34,11 +34,19 @@ code,kbd,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   width:30px; height:30px; border-radius:9px; display:grid; place-items:center;
   background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#04121f; font-weight:800;
 }
+/* The brand wifi glyph sits centred inside the .mark tile; the tile already
+   grid-centres its child, so only the icon's own size needs pinning. */
+.brand-icon{width:20px; height:20px}
 .nav{display:flex; gap:6px; flex-wrap:wrap; margin-left:auto}
 .nav-signout{display:flex; margin-left:10px; padding-left:12px; border-left:1px solid var(--line)}
-.nav a{padding:7px 13px; border-radius:999px; color:var(--muted); border:1px solid transparent; font-weight:550}
+.nav a{padding:7px 13px; border-radius:999px; color:var(--muted); border:1px solid transparent; font-weight:550; display:flex; align-items:center; gap:10px}
 .nav a:hover{color:var(--text); background:var(--panel-2); text-decoration:none}
 .nav a.active{color:#04121f; background:linear-gradient(135deg,var(--accent),var(--accent-2))}
+/* Nav glyphs track the link text: muted at rest, brightening on hover, and
+   flipping to the dark-on-gradient colour when the link is active. */
+.nav a .icon{color:var(--muted)}
+.nav a:hover .icon{color:var(--text)}
+.nav a.active .icon{color:#04121f}
 .wrap{width:100%; max-width:1220px; margin:0 auto; padding:24px 22px 48px; flex:1}
 .page-head{display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin-bottom:18px}
 .page-head .sub{color:var(--muted); margin:0}
@@ -54,6 +62,8 @@ code,kbd,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 .card h2{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
 .card .hint{color:var(--muted); font-size:.85rem; margin:0 0 12px}
 .stat{display:flex; flex-direction:column; gap:6px}
+/* A stat's title row: the label on the left, an optional glyph on the right. */
+.stat-head{display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%}
 .stat .label{color:var(--muted); font-size:.78rem; text-transform:uppercase; letter-spacing:.08em}
 .stat .value{font-size:1.85rem; font-weight:700; line-height:1.1}
 .stat .meta{color:var(--muted); font-size:.82rem}
@@ -64,6 +74,7 @@ tbody tr:hover{background:rgba(56,189,248,.06)}
 td.num,th.num{text-align:right}
 .table-wrap{overflow-x:auto; margin:0 -4px}
 .empty{color:var(--muted); text-align:center; padding:26px 10px; border:1px dashed var(--line); border-radius:12px}
+.empty .icon{opacity:.6}
 .badge{
   display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:999px;
   font-size:.74rem; font-weight:650; border:1px solid transparent; white-space:nowrap;
@@ -120,6 +131,15 @@ details.editor[open] summary{margin-bottom:12px}
 .inline-form{display:inline}
 .muted{color:var(--muted)}
 .nowrap{white-space:nowrap}
+/* Inline SVG icons. Stroke-based glyphs inherit currentColor, so the base rule
+   only fixes sizing and alignment; colour comes from the surrounding text. */
+.icon{width:18px; height:18px; flex:0 0 auto; vertical-align:middle}
+.icon.sm{width:14px; height:14px}
+.icon.lg{width:24px; height:24px}
+.icon.xl{width:32px; height:32px}
+/* A chevron on a disclosure toggle flips to point "open" when expanded. */
+.icon.chev{transition:transform .15s ease}
+details[open] .icon.chev{transform:rotate(180deg)}
 .theme-grid{display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
 .theme-card{
   display:flex; flex-direction:column; gap:6px; padding:0; overflow:hidden;
@@ -285,9 +305,9 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
     </form>
 
     <div class="stack">
-      <button type="button">CLAIM FREE TIME</button>
-      <button type="button">REDEEM</button>
-      <button type="button">WIFI RATES</button>
+      <button type="button">{{icon "clock"}} CLAIM FREE TIME</button>
+      <button type="button">{{icon "ticket"}} REDEEM</button>
+      <button type="button">{{icon "coins"}} WIFI RATES</button>
     </div>
 
     <footer>Powered by: {{.PortalName}}. &copy; {{.Year}} All rights reserved</footer>
@@ -405,23 +425,23 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
 {{end}}
 
 
-{{define "flash"}}{{with .Flash}}<div class="{{.Class}}" role="status">{{.Message}}</div>{{end}}{{end}}
+{{define "flash"}}{{with .Flash}}<div class="{{.Class}}" role="status">{{if eq .Kind "ok"}}{{icon "check-circle"}}{{else if eq .Kind "warn"}}{{icon "alert-triangle"}}{{else}}{{icon "x-circle"}}{{end}} {{.Message}}</div>{{end}}{{end}}
 
 {{define "csrf"}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
 
 {{define "nav"}}
 <header class="topbar">
-  <div class="brand"><span class="mark">A</span><span>{{.PortalName}}</span></div>
+  <div class="brand"><span class="mark">{{icon "wifi" "brand-icon"}}</span><span>{{.PortalName}}</span></div>
   <nav class="nav">
-    <a href="{{.AdminPath}}/"{{if eq .Nav "dashboard"}} class="active"{{end}}>Dashboard</a>
-    <a href="{{.AdminPath}}/routers"{{if eq .Nav "routers"}} class="active"{{end}}>Routers</a>
-    <a href="{{.AdminPath}}/network"{{if eq .Nav "network"}} class="active"{{end}}>Network</a>
-    <a href="{{.AdminPath}}/tools"{{if eq .Nav "tools"}} class="active"{{end}}>Tools</a>
-    <a href="{{.AdminPath}}/vouchers"{{if eq .Nav "vouchers"}} class="active"{{end}}>Vouchers</a>
-    <a href="{{.AdminPath}}/rates"{{if eq .Nav "rates"}} class="active"{{end}}>Rates</a>
-    <a href="{{.AdminPath}}/sessions"{{if eq .Nav "sessions"}} class="active"{{end}}>Sessions</a>
-    <a href="{{.AdminPath}}/portal-editor"{{if eq .Nav "portal"}} class="active"{{end}}>Portal</a>
-    <a href="{{.AdminPath}}/settings"{{if eq .Nav "settings"}} class="active"{{end}}>Settings</a>
+    <a href="{{.AdminPath}}/"{{if eq .Nav "dashboard"}} class="active"{{end}}>{{icon "gauge"}}Dashboard</a>
+    <a href="{{.AdminPath}}/routers"{{if eq .Nav "routers"}} class="active"{{end}}>{{icon "router"}}Routers</a>
+    <a href="{{.AdminPath}}/network"{{if eq .Nav "network"}} class="active"{{end}}>{{icon "network"}}Network</a>
+    <a href="{{.AdminPath}}/tools"{{if eq .Nav "tools"}} class="active"{{end}}>{{icon "wrench"}}Tools</a>
+    <a href="{{.AdminPath}}/vouchers"{{if eq .Nav "vouchers"}} class="active"{{end}}>{{icon "ticket"}}Vouchers</a>
+    <a href="{{.AdminPath}}/rates"{{if eq .Nav "rates"}} class="active"{{end}}>{{icon "tag"}}Rates</a>
+    <a href="{{.AdminPath}}/sessions"{{if eq .Nav "sessions"}} class="active"{{end}}>{{icon "users"}}Sessions</a>
+    <a href="{{.AdminPath}}/portal-editor"{{if eq .Nav "portal"}} class="active"{{end}}>{{icon "paintbrush"}}Portal</a>
+    <a href="{{.AdminPath}}/settings"{{if eq .Nav "settings"}} class="active"{{end}}>{{icon "settings"}}Settings</a>
   </nav>
   {{/* Signing out lands on the guest-facing captive portal, so the button says
        where it goes: an operator on a shared machine should not be surprised by
@@ -429,7 +449,7 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
        the CSRF token, and the label matches the button on Settings. */}}
   <form class="nav-signout" method="post" action="{{.AdminPath}}/logout">
     {{template "csrf" .}}
-    <button class="btn small danger" type="submit" title="Sign out and return to the captive portal">Sign out</button>
+    <button class="btn small danger" type="submit" title="Sign out and return to the captive portal">{{icon "log-out"}}Sign out</button>
   </form>
 </header>
 {{end}}
@@ -456,32 +476,32 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
       <form class="inline-form" method="post" action="/vouchers/{{.ID}}/push">
         {{template "csrf" $}}
         <input type="hidden" name="back" value="{{$.Back}}">
-        <button class="btn small" type="submit">Provision</button>
+        <button class="btn small" type="submit">{{icon "play"}}Provision</button>
       </form>
       <form class="inline-form" method="post" action="/vouchers/{{.ID}}/validate">
         {{template "csrf" $}}
         <input type="hidden" name="back" value="{{$.Back}}">
-        <button class="btn small" type="submit">Verify</button>
+        <button class="btn small" type="submit">{{icon "check"}}Verify</button>
       </form>
       {{if eq .Status "disabled"}}
       <form class="inline-form" method="post" action="/vouchers/{{.ID}}/status">
         {{template "csrf" $}}
         <input type="hidden" name="back" value="{{$.Back}}">
         <input type="hidden" name="status" value="unused">
-        <button class="btn small" type="submit">Enable</button>
+        <button class="btn small" type="submit">{{icon "power"}}Enable</button>
       </form>
       {{else}}
       <form class="inline-form" method="post" action="/vouchers/{{.ID}}/status">
         {{template "csrf" $}}
         <input type="hidden" name="back" value="{{$.Back}}">
         <input type="hidden" name="status" value="disabled">
-        <button class="btn small danger" type="submit">Disable</button>
+        <button class="btn small danger" type="submit">{{icon "ban"}}Disable</button>
       </form>
       {{end}}
       <form class="inline-form" method="post" action="/vouchers/{{.ID}}/delete">
         {{template "csrf" $}}
         <input type="hidden" name="back" value="{{$.Back}}">
-        <button class="btn small danger" type="submit">Delete</button>
+        <button class="btn small danger" type="submit">{{icon "trash"}}Delete</button>
       </form>
     </td>
   </tr>
@@ -490,7 +510,7 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
 
 {{define "footer"}}
 <footer>
-  <span>{{.PortalName}} · MikroTik hotspot controller</span>
+  {{icon "wifi" "sm"}}<span>{{.PortalName}} · MikroTik hotspot controller</span>
   <span class="spacer">v{{.Version}} · {{.Year}}</span>
 </footer>
 {{end}}

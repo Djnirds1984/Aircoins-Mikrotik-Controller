@@ -498,7 +498,10 @@ func TestToolsTemplateShowsHostZeroTierState(t *testing.T) {
 	}}
 	body := renderPage(t, "tools.html", view)
 	for _, want := range []string{
-		`<a href="/tools" class="active">Tools</a>`, `b8034f7f60`, `RUNNING`,
+		// The nav link now carries an inline <svg> icon between the opening
+		// tag and its label, so assert on the (unchanged) active anchor tag
+		// and the label separately rather than the pre-icon exact markup.
+		`<a href="/tools" class="active">`, `Tools</a>`, `b8034f7f60`, `RUNNING`,
 		`CITYCONNECT`, `e4da7455b23ac67d`, `zt6a2xynq4`, `10.242.137.78/16`, `Already installed.`,
 		`action="/tools/zerotier/leave"`, `action="/tools/zerotier/join"`,
 	} {

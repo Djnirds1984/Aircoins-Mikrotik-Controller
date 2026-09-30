@@ -69,6 +69,26 @@ func (t networkTab) Label() string {
 	}
 }
 
+// Icon returns the semantic icon name rendered beside a tab's label.
+func (t networkTab) Icon() string {
+	switch t {
+	case tabServerProfiles:
+		return "settings"
+	case tabUserProfiles:
+		return "users"
+	case tabWalledGarden:
+		return "shield"
+	case tabWalledGardenIP:
+		return "network"
+	case tabPools:
+		return "signal"
+	case tabVLANs:
+		return "network"
+	default:
+		return "router"
+	}
+}
+
 // Hint explains what a section configures, shown under its heading.
 func (t networkTab) Hint() string {
 	switch t {
