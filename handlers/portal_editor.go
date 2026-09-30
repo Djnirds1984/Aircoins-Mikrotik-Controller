@@ -198,6 +198,12 @@ type portalEditorPage struct {
 	BackgroundUpdatedAt *time.Time
 	// Defaults exposes the limits to the template.
 	Defaults portalEditorDefaults
+	// RouterLoginURL is the absolute address of the login page to install on
+	// the MikroTik, so the operator can paste it straight into /tool fetch.
+	RouterLoginURL string
+	// PortalHost is the address of this panel, for the walled-garden rule that
+	// makes it reachable before a guest has signed in.
+	PortalHost string
 	// Starter is the sample data the starter page is rendered with, so the
 	// operator sees a filled-in example rather than a wall of {{.Placeholders}}.
 	Starter portalFullData
@@ -285,7 +291,15 @@ func (h *Handler) PortalEditor(w http.ResponseWriter, r *http.Request) {
 	form.PageMode = settings.PageMode
 	form.FullHTML = settings.FullHTML
 
-	h.render(w, r, http.StatusOK, "portal_editor.html", h.newPortalEditorView(settings, form))
+	view := h.newPortalEditorView(settings, form)
+	// The install instructions are generated from the address the operator is
+	// actually using, so the commands can be pasted into RouterOS unchanged.
+	if base := portalBaseURL(r); base != "" {
+		view.RouterLoginURL = base + portalRouterLoginPath
+		view.PortalHost = portalRequestHost(r.Host)
+	}
+
+	h.render(w, r, http.StatusOK, "portal_editor.html", view)
 }
 
 // PortalEditorSave stores the theme, the header name and the extra HTML.

@@ -159,6 +159,58 @@
   </form>
 
   <section class="card" style="margin-top:16px">
+    <h2>Install the portal on the MikroTik</h2>
+    <p class="hint">
+      Until this is done the router keeps serving its own built-in
+      <span class="mono">hotspot/login.html</span>, so a guest who joins the SSID sees the
+      stock MikroTik portal and never reaches this panel. The panel can set up
+      the network, the server and the vouchers, but it does not write files to
+      your router — that one step is yours.
+    </p>
+
+    {{if .RouterLoginURL}}
+      <ol class="hint" style="padding-left:20px">
+        <li>
+          <strong>Check where the router keeps its hotspot pages.</strong>
+          <div class="code-area" style="padding:8px 10px;margin-top:6px">/ip hotspot profile print detail</div>
+          The <span class="mono">html-directory</span> value is where
+          <span class="mono">login.html</span> lives. It is usually
+          <span class="mono">hotspot</span>.
+        </li>
+        <li>
+          <strong>Back up the page you are about to replace.</strong>
+          <div class="code-area" style="padding:8px 10px;margin-top:6px">/file print name=hotspot/login.html</div>
+        </li>
+        <li>
+          <strong>Let the router fetch this panel's redirect page.</strong>
+          <div class="code-area" style="padding:8px 10px;margin-top:6px">/tool fetch url="{{.RouterLoginURL}}" dst-path=hotspot/login.html mode=http</div>
+        </li>
+        <li>
+          <strong>Let guests reach this panel before they sign in.</strong>
+          Without this rule the walled garden blocks the redirect and the guest
+          never gets the login page.
+          <div class="code-area" style="padding:8px 10px;margin-top:6px">/ip hotspot walled-garden add server=hotspot1 dst-host={{.PortalHost}} action=allow comment="aircoins login page"</div>
+          Replace <span class="mono">hotspot1</span> with your hotspot server name from
+          <span class="mono">/ip hotspot print</span>.
+        </li>
+      </ol>
+      <p class="hint">
+        You can also manage that walled-garden rule from
+        <a href="{{.AdminPath}}/network">Network &rarr; Walled garden</a> once the router is
+        registered. The same file is downloadable directly at
+        <a href="{{.RouterLoginURL}}" target="_blank" rel="noopener">{{.RouterLoginURL}}</a>.
+      </p>
+    {{else}}
+      <div class="alert warn">
+        The address of this panel could not be determined from the request, so
+        the install commands are not shown. Open this page through the panel's
+        real address, or download the page manually from
+        <code>/portal/router-login.html</code> and upload it to the router.
+      </div>
+    {{end}}
+  </section>
+
+  <section class="card" style="margin-top:16px">
     <h2>Background image</h2>
     <p class="hint">
       A JPEG or PNG shown behind the sign-in card, dimmed so the text stays readable.

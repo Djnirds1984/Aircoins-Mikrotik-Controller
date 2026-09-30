@@ -231,6 +231,13 @@ func (h *Handler) Routes() http.Handler {
 		mux.HandleFunc("GET "+entry, h.PortalIndex)
 	}
 
+	// The hotspot login page the operator installs on the MikroTik, served so
+	// the router can fetch it with /tool fetch. Registered here rather than in
+	// adminRoutes because the router has no panel session: behind requireAuth it
+	// would answer a 303 to the login form and the router would save THAT as the
+	// guest's login page.
+	mux.HandleFunc("GET "+portalRouterLoginPath, h.PortalRouterLogin)
+
 	// The panel under its prefix, behind the session guard. "/admin" (no
 	// slash) has to redirect by hand because the subtree pattern only
 	// matches "/admin/".
