@@ -26,6 +26,7 @@ func TemplateFuncs() template.FuncMap {
 		"statusClass":   routerStatusClass,
 		"pct":           percent,
 		"portalAction":  portalAction,
+		"coinAction":    coinAction,
 		"add":           func(a, b int) int { return a + b },
 		"sub":           func(a, b int) int { return a - b },
 		// div renders a byte count in whole units, so a limit shown in the UI
@@ -290,6 +291,41 @@ func portalAction(p portalRequest) template.URL {
 
 // portalLoginPath is the captive portal sign-in endpoint.
 const portalLoginPath = "/portal/login"
+
+// coinAction builds the "Done / Connect now" form's action URL, carrying the
+// hotspot parameters through so the POST completes the MikroTik handshake
+// exactly as the voucher login does.
+//
+// It exists for the same reason portalAction does and returns template.URL for
+// the same reason: html/template would percent-encode the "=" and "&" of a
+// plain string into one collapsed query key, silently breaking every coin
+// connection. The values are not trusted, so they go through url.Values and the
+// path is one of this package's own constants.
+func coinAction(coin coinPortal, p portalRequest) template.URL {
+	values := url.Values{}
+	for key, value := range map[string]string{
+		"mac":             p.MAC,
+		"ip":              p.IP,
+		"link-login":      p.LinkLogin,
+		"link-login-only": p.LinkLoginOnly,
+		"link-orig":       p.LinkOrig,
+		"server-name":     p.ServerName,
+	} {
+		if value != "" {
+			values.Set(key, value)
+		}
+	}
+	// The subject the balance lives under is passed explicitly so the POST
+	// resolves the same row the page has been polling, even if the hotspot
+	// appended no parameters at all.
+	if coin.Subject != "" {
+		values.Set("subject", coin.Subject)
+	}
+	if values.Encode() == "" {
+		return template.URL(coinConnectPath)
+	}
+	return template.URL(coinConnectPath + "?" + values.Encode())
+}
 
 func defaultValue(v, fallback string) string {
 	if strings.TrimSpace(v) == "" {

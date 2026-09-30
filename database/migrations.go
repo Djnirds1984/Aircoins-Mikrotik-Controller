@@ -125,6 +125,45 @@ const adminSessionsIndexesDDL = `
 CREATE INDEX IF NOT EXISTS admin_sessions_expiry_idx ON admin_sessions(expires_at);
 CREATE INDEX IF NOT EXISTS admin_sessions_user_idx ON admin_sessions(user_id)`
 
+// coinCreditsDDL backs the coin-slot credit tally fed by the NodeMCU.
+//
+// The tally is keyed by "subject" rather than by MAC alone for two reasons:
+// a MikroTik hotspot only reports the MAC on clients it has already seen, so
+// a guest standing at the coin box often has an address and nothing else; and
+// a kiosk that never gets a MAC at all still has to be able to accumulate a
+// credit. The subject is therefore "mac:<normalized>" when the MAC is known
+// and "ip:<address>" otherwise, which keeps one row per paying client either
+// way.
+//
+// granted_seconds is the running total of access time the inserted money has
+// bought and used_seconds is how much of it has already been handed to the
+// device. Keeping both (rather than a single "remaining" column that gets
+// overwritten) means the audit trail survives a controller restart and the
+// portal can always show what was paid for and what was consumed.
+const coinCreditsDDL = `
+    CREATE TABLE IF NOT EXISTS coin_credits (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        subject        TEXT NOT NULL UNIQUE,
+        mac_address    TEXT NOT NULL DEFAULT '',
+        router_id      INTEGER REFERENCES routers(id) ON DELETE SET NULL,
+        node_id        TEXT NOT NULL DEFAULT '',
+        pulses         INTEGER NOT NULL DEFAULT 0 CHECK (pulses >= 0),
+        amount_cents   INTEGER NOT NULL DEFAULT 0 CHECK (amount_cents >= 0),
+        granted_seconds INTEGER NOT NULL DEFAULT 0 CHECK (granted_seconds >= 0),
+        used_seconds   INTEGER NOT NULL DEFAULT 0 CHECK (used_seconds >= 0),
+        status         TEXT NOT NULL DEFAULT 'active',
+        last_event     TEXT NOT NULL DEFAULT '',
+        last_pulse_at  TEXT,
+        connected_at   TEXT,
+        expires_at     TEXT,
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL
+    )`
+
+const coinCreditsIndexesDDL = `
+    CREATE INDEX IF NOT EXISTS coin_credits_status_idx ON coin_credits(status, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS coin_credits_node_idx ON coin_credits(node_id)`
+
 const (
 	routersTransportDDL = `ALTER TABLE routers ADD COLUMN transport TEXT NOT NULL DEFAULT 'auto'`
 	routersRestPortDDL  = `ALTER TABLE routers ADD COLUMN rest_port INTEGER NOT NULL DEFAULT 0`
@@ -180,6 +219,16 @@ var migrations = []migration{
 			// existing install on the built-in page.
 			portalPageModeDDL,
 			portalFullHTMLDDL,
+		},
+	},
+	{
+		version: 6,
+		name:    "coin-credits",
+		statements: []string{
+			// The credit tally a coin-slot NodeMCU posts to. Purely additive:
+			// an install that never wires up hardware is unaffected.
+			coinCreditsDDL,
+			coinCreditsIndexesDDL,
 		},
 	},
 }

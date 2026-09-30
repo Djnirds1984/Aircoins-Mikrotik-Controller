@@ -88,6 +88,23 @@ helper and matching sudoers rule.
 | `SECURE_COOKIES` | — | Set `1` behind HTTPS |
 | `VERSION` | `dev` | Build-time footer version only (`-ldflags "-X main.version=1.0.0"`; `install.sh` uses `AIRCOINS_VERSION=1.0.0`) |
 
+### Piso Wi-Fi coin slot
+
+These only matter if you have fitted a coin acceptor (see
+`hardware/nodemcu_coin_slot/`). They are ignored otherwise.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `COIN_NODE_TOKEN` | — | **Shared secret the NodeMCU presents on `/api/coin-pulse`.** While it is unset the endpoint rejects every report, so a controller on the guest network can never be used to mint free time. Generate with `openssl rand -hex 24`. |
+| `COIN_SECONDS_PER_PULSE` | `300` | Access time one acceptor pulse buys. The usual acceptor emits one pulse per ~25 s of time for a 5-peso coin, i.e. `300`. |
+| `COIN_CENTS_PER_PULSE` | `500` | Face value of one pulse, in the smallest currency unit. Recorded for the operator's reconciliation only; the time above is what reaches the customer. |
+| `COIN_IDLE_TTL` | `20m` | How long an inserted-but-unconnected balance survives, so the next customer on the same address does not inherit it. |
+| `COIN_MAX_SESSION_MINUTES` | `240` | Cap on one "Done / Connect now". Guards against a jammed acceptor. |
+
+A bad value in any of these is reported on stderr and the default is used, so a
+typo cannot stop the controller from booting — or, worse, be read as zero and
+make every coin worthless.
+
 Router API passwords are AES-256-GCM encrypted at rest; without the
 master key a stolen `.db` file is useless.
 

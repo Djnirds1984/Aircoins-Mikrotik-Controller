@@ -56,6 +56,16 @@ func loadConfig() (appConfig, string, error) {
 		}
 	}
 
+	// Piso Wi-Fi coin slot. COIN_NODE_TOKEN is the shared secret a NodeMCU
+	// presents on /api/coin-pulse; while it is empty that endpoint refuses
+	// every report, so a controller exposed on a hotspot is never a free
+	// internet vending machine.
+	cfg.Handler.CoinNodeToken = strings.TrimSpace(os.Getenv("COIN_NODE_TOKEN"))
+	cfg.Handler.CoinPulseSeconds = envInt("COIN_SECONDS_PER_PULSE", 300)
+	cfg.Handler.CoinPulseCents = envInt("COIN_CENTS_PER_PULSE", 500)
+	cfg.Handler.CoinIdleTTL = envDuration("COIN_IDLE_TTL", 20*time.Minute)
+	cfg.Handler.CoinMaxSessionMinutes = envInt("COIN_MAX_SESSION_MINUTES", 240)
+
 	// The panel ships on port 80 so it is reachable as http://<board-ip>/
 	// without a port suffix; install.sh grants the service user
 	// CAP_NET_BIND_SERVICE. ADDR still takes any ":port" or "host:port".
@@ -80,6 +90,39 @@ func envBool(key string) bool {
 	default:
 		return false
 	}
+}
+
+// envInt reads a positive integer, falling back on anything unparsable.
+//
+// The coin slot's money-to-time rate is the one number an operator will fat
+// finger ("COIN_SECONDS_PER_PULSE=5m"), and a bad value must not stop the
+// controller from booting or, worse, be silently read as zero - which would
+// make every coin worth nothing.
+func envInt(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		fmt.Fprintf(os.Stderr, "aircoins-controller: ignoring invalid %s %q (want a positive whole number)\n", key, raw)
+		return fallback
+	}
+	return n
+}
+
+// envDuration reads a duration, falling back on anything unparsable.
+func envDuration(key string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		fmt.Fprintf(os.Stderr, "aircoins-controller: ignoring invalid %s %q (want e.g. 20m)\n", key, raw)
+		return fallback
+	}
+	return d
 }
 
 // splitListenAddr validates host:port addresses, tolerating a bare port.

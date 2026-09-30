@@ -49,6 +49,11 @@
         </form>
       </details>
 
+      {{/* The Piso Wi-Fi coin slot. It sits on the landing page as well as the
+           sign-in form so a customer who has just walked up to the machine does
+           not have to pick the right tab first. */}}
+      {{template "coinTab" .}}
+
       <p class="hint" style="margin-top:16px">{{.Support}}</p>
       {{if .RouterKnown}}
         <p class="hint">Network: <strong>{{.RouterName}}</strong></p>
@@ -63,5 +68,6 @@
     <a href="{{.AdminPath}}/" rel="nofollow">Staff &amp; administration</a>
   </p>
 </main>
+{{template "coinScript" .}}
 </body>
 </html>

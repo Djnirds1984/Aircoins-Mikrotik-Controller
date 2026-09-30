@@ -17,7 +17,12 @@ import (
 // rule holds for /admin/portal/login.
 func (h *Handler) isPublicPath(r *http.Request) bool {
 	switch h.trimAdminPath(r.URL.Path) {
-	case "/portal/login", "/portal/status", portalStatusPagePath, portalBackgroundPath, "/login", "/logout":
+	case "/portal/login", "/portal/status", portalStatusPagePath, portalBackgroundPath,
+		"/login", "/logout", coinConnectPath:
+		// coinConnectPath spends a coin balance, but the balance itself is keyed
+		// on the MAC/IP the hotspot reported, so an off-site form can reach the
+		// route and still find nothing to spend. The portal limiter covers the
+		// rest.
 		return true
 	}
 	return false

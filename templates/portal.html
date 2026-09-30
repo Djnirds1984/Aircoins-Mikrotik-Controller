@@ -73,6 +73,12 @@
         </form>
       </details>
 
+      {{/* The Piso Wi-Fi coin slot. On this page it is the alternative to typing
+           a code, so it sits directly under the voucher form rather than
+           behind another disclosure: a customer standing at the machine with a
+           coin in their hand should not have to hunt for it. */}}
+      {{template "coinTab" .}}
+
       <p class="hint" style="margin-top:14px">
         {{if .Portal.MAC}}Device <span class="mono">{{.Portal.MAC}}</span>{{end}}
         {{if .Portal.IP}} · <span class="mono">{{.Portal.IP}}</span>{{end}}
@@ -85,5 +91,6 @@
   </div>
   <p class="portal-foot">{{.PortalName}} · ask the front desk if a code does not work</p>
 </main>
+{{template "coinScript" .}}
 </body>
 </html>

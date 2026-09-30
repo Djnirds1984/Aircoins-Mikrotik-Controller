@@ -63,6 +63,26 @@ type Config struct {
 	PortalLoginBurst int
 	// PortalLoginWindow is the throttling window for portal logins.
 	PortalLoginWindow time.Duration
+	// CoinNodeToken is the shared secret a coin-slot NodeMCU presents in the
+	// X-Coin-Token header on /api/coin-pulse. It is deliberately NOT optional:
+	// while it is empty the endpoint rejects every report, so a controller
+	// reachable from the hotspot network can never be used to mint free time.
+	CoinNodeToken string
+	// CoinPulseSeconds is how much access time one acceptor pulse buys. The
+	// common setting is a 5-peso coin emitting one pulse per 25 seconds of
+	// time, i.e. 300.
+	CoinPulseSeconds int
+	// CoinPulseCents is the face value one pulse is worth, in the smallest
+	// currency unit. It is recorded for the operator's reconciliation only -
+	// the granted time above is what actually reaches the customer.
+	CoinPulseCents int
+	// CoinIdleTTL releases a balance that was topped up but never connected
+	// after this long, so the next customer on the same address does not
+	// inherit it.
+	CoinIdleTTL time.Duration
+	// CoinMaxSessionMinutes caps a single "Done / Connect now" so a fat finger
+	// on the coin box cannot hand out a week of access at once.
+	CoinMaxSessionMinutes int
 	// Version is displayed in the footer.
 	Version string
 	// Logger receives request and error logs.
@@ -103,6 +123,21 @@ func (c Config) withDefaults() Config {
 	}
 	if c.AdminSessionTTL <= 0 {
 		c.AdminSessionTTL = 12 * time.Hour
+	}
+	// A zero CoinPulseSeconds would make every coin worth nothing, which is a
+	// far worse failure than the default, so it is filled in rather than
+	// trusted.
+	if c.CoinPulseSeconds <= 0 {
+		c.CoinPulseSeconds = 300
+	}
+	if c.CoinPulseCents <= 0 {
+		c.CoinPulseCents = 500
+	}
+	if c.CoinIdleTTL <= 0 {
+		c.CoinIdleTTL = 20 * time.Minute
+	}
+	if c.CoinMaxSessionMinutes <= 0 {
+		c.CoinMaxSessionMinutes = 240
 	}
 	return c
 }
@@ -239,6 +274,17 @@ func (h *Handler) Routes() http.Handler {
 	// guest's login page.
 	mux.HandleFunc("GET "+portalRouterLoginPath, h.PortalRouterLogin)
 
+	// The coin slot's machine API. These two are registered on the outer mux for
+	// the same reason: neither the NodeMCU (no browser, no cookie) nor the
+	// portal's own JavaScript (polling before anyone has signed in) carries a
+	// panel session, and both live outside the guarded subtree.
+	//
+	// They are not unauthenticated, though - they carry their own rules. The
+	// write requires the node's shared secret, and the read is scoped to one
+	// client's balance and returns a zeroed answer for anyone else.
+	mux.HandleFunc("POST "+coinPulsePath, h.CoinPulse)
+	mux.HandleFunc("GET "+coinStatusPath, h.CoinStatus)
+
 	// The panel under its prefix, behind the session guard. "/admin" (no
 	// slash) has to redirect by hand because the subtree pattern only
 	// matches "/admin/".
@@ -360,6 +406,14 @@ func (h *Handler) adminRoutes() *http.ServeMux {
 	// only ever reports the session belonging to the address making the
 	// request.
 	mux.HandleFunc("GET "+portalStatusPagePath, h.PortalStatusPage)
+
+	// Piso Wi-Fi coin slot. The "Insert coin" tab posts here, which is why it
+	// sits under /portal/ and is exempt from the CSRF guard below: a captive
+	// portal client is redirected by the hotspot and may drop cookies inside
+	// the walled garden, so the double-submit token is not available to it.
+	// Spending a balance still cannot be forged from another origin, because
+	// the balance is looked up by the MAC/IP the hotspot itself reported.
+	mux.HandleFunc("POST "+coinConnectPath, h.CoinConnect)
 
 	// The stored portal background photo. Public, because the guest facing
 	// pages fetch it before anyone has signed in.
@@ -493,6 +547,16 @@ func (h *Handler) csrfGuard(next http.Handler) http.Handler {
 			return
 		}
 		if strings.HasPrefix(h.trimAdminPath(r.URL.Path), "/api/v1/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if h.trimAdminPath(r.URL.Path) == coinPulsePath {
+			// The coin-slot write endpoint is exempt because it is not a cookie
+			// authenticated request at all: a NodeMCU has no session and
+			// presents a shared secret in a header, which a cross-site form
+			// cannot set. Requiring the double-submit token here would break the
+			// hardware without adding any protection, and a browser on the
+			// walled garden could not obtain one anyway.
 			next.ServeHTTP(w, r)
 			return
 		}

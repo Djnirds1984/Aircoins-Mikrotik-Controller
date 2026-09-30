@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/djnirds1984/aircoins-mikrotik-controller/database"
@@ -47,6 +49,55 @@ type portalStatusPage struct {
 	// LoginURL and AdminPath link onwards.
 	LoginURL  string
 	AdminPath string
+	// Coin is the state of the "Insert coin" tab on the sign-in page.
+	Coin coinPortal
+}
+
+// coinPortalFor resolves everything the guest's coin tab needs for one page
+// render.
+//
+// The balance is read here rather than left to the first poll so the counter is
+// correct the instant the page appears: a customer who has already inserted a
+// coin and reloads the page must not watch it sit on zero for two seconds. A
+// read failure is deliberately not fatal - the tab falls back to its
+// server-rendered zero and the poller repairs it a moment later, which is far
+// better than refusing to render a sign-in page because a credit lookup failed.
+func (h *Handler) coinPortalFor(r *http.Request, request portalRequest) coinPortal {
+	ctx := r.Context()
+	subject := database.CoinSubject(request.MAC, request.IP)
+
+	coin := coinPortal{
+		Enabled:              strings.TrimSpace(h.cfg.CoinNodeToken) != "",
+		Subject:              subject,
+		StatusURL:            coinStatusPath,
+		ConnectURL:           coinConnectPath,
+		SecondsPerPulse:      h.cfg.CoinPulseSeconds,
+		SecondsPerPulseLabel: database.FormatCoinSeconds(h.cfg.CoinPulseSeconds),
+		IdleMinutes:          int(h.cfg.CoinIdleTTL.Minutes()),
+	}
+
+	// A page rendered without hotspot parameters still knows who is asking: it
+	// is the address the request came from.
+	if subject == "" {
+		subject = database.CoinSubject("", clientIP(r))
+		coin.Subject = subject
+	}
+	if subject == "" {
+		return coin
+	}
+
+	credit, err := h.db.Coins().Get(ctx, subject)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			h.log.Warn("portal cannot read the coin balance", "subject", subject, "error", err)
+		}
+		return coin
+	}
+
+	coin.RemainingSeconds = credit.RemainingSeconds()
+	coin.SessionLabel = database.FormatCoinSeconds(credit.RemainingSeconds())
+	coin.MoneyLabel = fmt.Sprintf("%.2f", float64(credit.AmountCents)/100)
+	return coin
 }
 
 // PortalStatusPage serves the guest's own session view.

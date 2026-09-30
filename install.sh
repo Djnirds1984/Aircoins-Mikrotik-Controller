@@ -333,6 +333,13 @@ PORTAL_NAME=$PORTAL_NAME
 # DEFAULT_REDIRECT=https://example.com/
 API_TIMEOUT=12s
 # SECURE_COOKIES=1
+
+# Piso Wi-Fi coin slot. Uncomment and set a token to enable it; while
+# COIN_NODE_TOKEN is empty the controller refuses every coin report, so leaving
+# this out is safe and costs nothing.
+# COIN_NODE_TOKEN=$(openssl rand -hex 24)
+# COIN_SECONDS_PER_PULSE=300
+# COIN_IDLE_TTL=20m
 EOF
   chmod 640 "$ENV_FILE"
 else

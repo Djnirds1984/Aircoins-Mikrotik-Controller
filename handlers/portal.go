@@ -78,6 +78,8 @@ type portalPage struct {
 	// Branding is the operator's theme, header name, background and extra HTML,
 	// resolved from the PORTAL editor.
 	Branding portalBranding
+	// Coin is the state of the "Insert coin" tab.
+	Coin coinPortal
 }
 
 // PortalLogin serves the captive portal login page. MikroTik redirects the
@@ -90,6 +92,7 @@ func (h *Handler) PortalLogin(w http.ResponseWriter, r *http.Request) {
 		page:     page{Title: "Sign in", Nav: ""},
 		Portal:   request,
 		Branding: h.portalBrandingFor(ctx),
+		Coin:     h.coinPortalFor(r, request),
 	}
 
 	// A hotspot reports a failed attempt by redirecting back with ?error=...
@@ -147,6 +150,7 @@ func (h *Handler) PortalAuthenticate(w http.ResponseWriter, r *http.Request) {
 		page:         page{Title: "Sign in", Nav: ""},
 		Portal:       request,
 		ShowPassword: username != "",
+		Coin:         h.coinPortalFor(r, request),
 	}
 
 	if request.IP == "" && request.MAC == "" {

@@ -165,7 +165,32 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
      squeezed against the brand on a phone-width screen. */
   .nav-signout{margin-left:0; padding-left:0; border-left:0}
   h1{font-size:1.25rem}
+  /* Two readout cells stop fitting side by side on a narrow phone once the
+     labels wrap, so they stack instead of shrinking the numbers. */
+  .coin-readout{grid-template-columns:1fr}
 }
+/* Coin tab styling, kept here rather than in the pages so the tab looks the
+   same on the welcome screen and on the sign-in form. The readout mirrors the
+   clock cards on the session page: big, tabular figures that do not reflow as
+   the numbers change underneath the reader. */
+.coin{margin-top:16px}
+.coin h2{font-size:1.05rem; margin-bottom:.2em}
+.coin .sub{color:var(--muted); margin:0 0 12px}
+.coin-readout{display:grid; gap:12px; grid-template-columns:1fr 1fr; margin:14px 0 4px}
+.coin-cell{
+  border:1px solid var(--line); border-radius:14px; padding:12px 14px;
+  background:rgba(0,0,0,.18); text-align:center;
+}
+.coin-cell .label{color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.09em}
+.coin-cell .value{
+  font-size:1.35rem; font-weight:700; color:var(--accent); margin-top:4px;
+  font-variant-numeric:tabular-nums; white-space:nowrap;
+}
+/* The figure flashes briefly whenever it changes, so a customer who is looking
+   at their phone rather than the kiosk screen still notices the coin land. */
+.coin-cell.pulse .value{animation:coinPulse .6s ease-out}
+@keyframes coinPulse{0%{transform:scale(1)}35%{transform:scale(1.12)}100%{transform:scale(1)}}
+.coin #coin-hint{min-height:1.4em}
 </style>{{end}}
 
 {{define "portalStarter"}}
@@ -250,6 +275,70 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
 </html>
 </template>
 {{end}}
+
+{{/* The "Insert coin" tab, shared by the captive welcome page and the sign-in
+     page so both offer the same flow.
+
+     It is deliberately self-contained vanilla HTML + JS with no build step and
+     no external asset: a guest behind a captive portal has no internet at all,
+     so anything fetched from a CDN simply never loads. Everything the script
+     needs is rendered into data-* attributes by the handler, which means the
+     rates on screen are always the server's real configuration rather than
+     numbers typed into the markup. */}}
+{{define "coinTab"}}
+<section class="coin" id="coin-tab"
+         data-subject="{{.Coin.Subject}}"
+         data-status-url="{{.Coin.StatusURL}}"
+         data-connect-url="{{.Coin.ConnectURL}}"
+         data-seconds="{{.Coin.RemainingSeconds}}"
+         data-enabled="{{.Coin.Enabled}}">
+
+  <h2>Insert coin</h2>
+  <p class="sub">Drop a coin into the slot. This page updates by itself.</p>
+
+  {{if not .Coin.Enabled}}
+    <div class="alert warn">
+      The coin slot is not set up on this network yet. Ask the front desk for a
+      voucher code instead.
+    </div>
+  {{else}}
+    <div class="coin-readout">
+      {{/* The two numbers the customer actually cares about: what they paid and
+           what it bought. Both are rendered server side so they are correct on
+           first paint, then kept live by the poller below. */}}
+      <div class="coin-cell">
+        <div class="label">Time bought</div>
+        <div class="value" id="coin-time" data-seconds="{{.Coin.RemainingSeconds}}">{{.Coin.SessionLabel}}</div>
+      </div>
+      <div class="coin-cell">
+        <div class="label">Inserted</div>
+        <div class="value" id="coin-amount">{{if .Coin.MoneyLabel}}{{.Coin.MoneyLabel}}{{else}}0.00{{end}}</div>
+      </div>
+    </div>
+
+    <p class="hint" id="coin-hint" role="status" aria-live="polite">
+      Waiting for the coin slot&hellip;
+    </p>
+
+    {{/* The action posts to the controller, which turns the balance into a real
+         hotspot session. The hotspot parameters travel with it, so the client is
+         logged in against the right host and sent on to where it was going.
+         coinAction builds that query safely, for the same reason portalAction
+         does. */}}
+    <form method="post" action="{{coinAction .Coin .Portal}}">
+      <button class="btn primary btn-block" type="submit" id="coin-connect">
+        Done &mdash; Connect now
+      </button>
+    </form>
+
+    <p class="hint">
+      Each coin buys about {{.Coin.SecondsPerPulseLabel}}.
+      {{if .Coin.IdleMinutes}}Unused credit is released after {{.Coin.IdleMinutes}} minutes, so insert your coins before you connect.{{end}}
+    </p>
+  {{end}}
+</section>
+{{end}}
+
 
 {{define "flash"}}{{with .Flash}}<div class="{{.Class}}" role="status">{{.Message}}</div>{{end}}{{end}}
 
@@ -339,3 +428,170 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
   <span class="spacer">v{{.Version}} · {{.Year}}</span>
 </footer>
 {{end}}
+
+
+{{/* The coin tab's live updater, shared by every page that shows the tab.
+
+   Why it polls at all: the balance lives on the controller, and the only thing
+   that knows a coin went in is the NodeMCU. Polling /api/coin-status is the
+   simplest way for the browser to learn about it, and two seconds is a good
+   compromise - fast enough that a customer sees the number move while they are
+   still looking at the screen, slow enough that a kiosk left open overnight does
+   not put meaningful load on the board.
+
+   Robustness rules this script follows, all of which matter on a walled-garden
+   connection that drops without warning:
+     * a failed poll never blanks the screen, it just says so quietly;
+     * a response for a stale page (the guest navigated back) is ignored;
+     * the interval is cleared when the tab is hidden and restarted when it
+       comes back, so a phone in a pocket is not polling the controller;
+     * every string is written through textContent, never innerHTML, so a value
+       from the network can never become markup. */}}
+{{define "coinScript"}}
+<script>
+(function () {
+  var tab = document.getElementById('coin-tab');
+  if (!tab) { return; }
+
+  var POLL_MS = 2000;
+  var DAY = 86400, HOUR = 3600, MINUTE = 60;
+
+  var subject = tab.getAttribute('data-subject') || '';
+  var statusURL = tab.getAttribute('data-status-url') || '/api/coin-status';
+  var enabled = tab.getAttribute('data-enabled') === 'true';
+
+  var timeEl = document.getElementById('coin-time');
+  var amountEl = document.getElementById('coin-amount');
+  var hintEl = document.getElementById('coin-hint');
+  var button = document.getElementById('coin-connect');
+  var timer = null;
+
+  // A page rendered with no address and no MAC has nothing to poll for. The
+  // controller would fall back to the request's own address, but on a kiosk
+  // behind NAT that is the wrong client, so the tab stays quiet instead of
+  // showing somebody else's balance.
+  if (!enabled || !subject || !timeEl) { return; }
+
+  var lastSeconds = parseInt(timeEl.getAttribute('data-seconds'), 10) || 0;
+  var failures = 0;
+
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+
+  // Renders the same shape the server's formatMinutes uses ("10 min", "1h",
+  // "1h 30m") so the figure does not change wording the moment the first poll
+  // replaces the server-rendered value with a locally rendered one. Keeping the
+  // two identical is what stops the counter from visibly reflowing on load.
+  function render(total) {
+    if (total <= 0) { return '0m'; }
+    var h = Math.floor(total / HOUR);
+    var m = Math.floor((total % HOUR) / MINUTE);
+    if (h === 0) { return m + ' min'; }
+    if (m === 0) { return h + 'h'; }
+    return h + 'h ' + m + 'm';
+  }
+
+  function money(cents) {
+    var value = (cents || 0) / 100;
+    return value.toFixed(2);
+  }
+
+  function flash(el) {
+    var cell = el ? el.parentNode : null;
+    if (!cell) { return; }
+    cell.classList.remove('pulse');
+    // Force a reflow so re-adding the class restarts the animation even when
+    // two coins land back to back.
+    void cell.offsetWidth;
+    cell.classList.add('pulse');
+  }
+
+  function setHint(text) {
+    if (hintEl) { hintEl.textContent = text; }
+  }
+
+  function apply(data) {
+    var seconds = data.remaining_seconds || 0;
+    if (seconds !== lastSeconds) {
+      lastSeconds = seconds;
+      timeEl.textContent = render(seconds);
+      timeEl.setAttribute('data-seconds', String(seconds));
+      flash(timeEl);
+    }
+    if (amountEl) {
+      var text = money(data.amount_cents);
+      if (amountEl.textContent !== text) {
+        amountEl.textContent = text;
+        flash(amountEl);
+      }
+    }
+
+    if (seconds > 0) {
+      setHint('Credit ready. Press "Done - Connect now" when you are finished inserting coins.');
+      if (button) { button.disabled = false; }
+    } else {
+      setHint('Insert a coin to start.');
+      if (button) { button.disabled = true; }
+    }
+  }
+
+  function poll() {
+    // cache:"no-store" matters: without it a proxy or the phone's own cache
+    // can serve a stale balance and the customer watches a number that never
+    // moves.
+    fetch(statusURL + '?subject=' + encodeURIComponent(subject), {
+      cache: 'no-store',
+      headers: { 'Accept': 'application/json' },
+      credentials: 'same-origin'
+    }).then(function (response) {
+      if (!response.ok) { throw new Error('HTTP ' + response.status); }
+      return response.json();
+    }).then(function (data) {
+      failures = 0;
+      apply(data);
+    }).catch(function () {
+      // Deliberately quiet. A transient failure on a walled-garden Wi-Fi is
+      // normal and must not alarm a customer who is holding a coin; only a
+      // sustained outage is worth mentioning, and even then the last known
+      // figure stays on screen rather than being replaced with a zero.
+      failures += 1;
+      if (failures >= 5) {
+        setHint('Cannot reach the hotspot controller. Showing the last known balance - ask the front desk if this persists.');
+      }
+    });
+  }
+
+  function start() {
+    if (timer === null) {
+      poll();
+      timer = setInterval(poll, POLL_MS);
+    }
+  }
+
+  function stop() {
+    if (timer !== null) {
+      clearInterval(timer);
+      timer = null;
+    }
+  }
+
+  // Poll immediately so the first paint is corrected without waiting a full
+  // interval, and reflect the server-rendered value in the meantime.
+  apply({ remaining_seconds: lastSeconds, amount_cents: 0 });
+  start();
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) { stop(); } else { start(); }
+  });
+
+  if (button) {
+    button.addEventListener('click', function () {
+      // Stop polling the moment the customer commits, so a response that
+      // arrives mid-navigation cannot repaint the page underneath the redirect.
+      stop();
+      button.textContent = 'Connecting...';
+    });
+  }
+})();
+</script>
+{{end}}
+

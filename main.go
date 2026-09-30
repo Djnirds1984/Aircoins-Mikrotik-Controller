@@ -253,7 +253,7 @@ func run() error {
 	}
 
 	done := make(chan struct{})
-	go expirySweeper(db, logger, done)
+	go expirySweeper(db, logger, cfg.Handler.CoinIdleTTL, done)
 	defer close(done)
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

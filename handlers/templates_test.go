@@ -26,7 +26,7 @@ var templateNames = []string{
 }
 
 // partialNames are the blocks the pages above include.
-var partialNames = []string{"partials.html", "styles", "nav", "flash", "csrf", "voucherRows", "portalStarter"}
+var partialNames = []string{"partials.html", "styles", "nav", "flash", "csrf", "voucherRows", "portalStarter", "coinTab", "coinScript"}
 
 // TestTemplatesParse catches the two mistakes a template edit usually makes: an
 // unbalanced {{if}}/{{end}} and a {{template "x"}} naming a block that does not
