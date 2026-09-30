@@ -23,8 +23,9 @@
       </dl>
       <p class="hint" style="margin-top:14px">You can close this page and open any website.</p>
       <div class="btn-row" style="margin-top:14px">
+        <a class="btn primary" href="/portal/session">View session timer</a>
         <a class="btn" href="/">Refresh</a>
-        {{if .Portal.LinkOrig}}<a class="btn primary" href="{{.Portal.LinkOrig}}">Continue browsing</a>{{end}}
+        {{if .Portal.LinkOrig}}<a class="btn" href="{{.Portal.LinkOrig}}">Continue browsing</a>{{end}}
       </div>
     {{else}}
       <h1>Free Wi-Fi</h1>

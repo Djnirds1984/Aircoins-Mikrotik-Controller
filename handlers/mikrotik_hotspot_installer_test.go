@@ -15,6 +15,185 @@ import (
 	"github.com/djnirds1984/aircoins-mikrotik-controller/database"
 )
 
+// portalStub serves the RouterOS endpoints the portal install touches: the two
+// menus that report the html directory and /file, plus /tool/fetch.
+//
+// fileSize is what /file/print claims the destination file holds, so a test can
+// model both a real install and the silent-failure case where the fetch reported
+// success but wrote nothing.
+func portalStub(t *testing.T, commands *[]string, serverDir, fileSize string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		*commands = append(*commands, r.Method+" "+r.URL.Path+" "+string(raw))
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/rest/ip/hotspot" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`[{"name":"hotspot1","html-directory":"` + serverDir + `"}]`))
+		case r.URL.Path == "/rest/ip/hotspot/profile" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`[{"name":"hsprof1"}]`))
+		case r.URL.Path == "/rest/file" && r.Method == http.MethodGet:
+			if fileSize == "" {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			_, _ = w.Write([]byte(`[{"name":"` + serverDir + `/login.html","size":"` + fileSize + `"}]`))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+}
+
+// TestHotspotLoginPath pins the destination. The stock directory is the
+// fallback, and a directory with stray slashes must not produce a doubled path.
+func TestHotspotLoginPath(t *testing.T) {
+	cases := map[string]string{
+		"":            "hotspot/login.html",
+		"hotspot":     "hotspot/login.html",
+		"/custom/":    "custom/login.html",
+		"  hotspot  ": "hotspot/login.html",
+	}
+	for dir, want := range cases {
+		if got := hotspotLoginPath(dir); got != want {
+			t.Errorf("hotspotLoginPath(%q) = %q, want %q", dir, got, want)
+		}
+	}
+}
+
+// TestInstallHotspotPortalFetchesAndVerifies is the happy path: the panel's page
+// is fetched into the directory the DEVICE reports, and the result is only
+// marked verified because the file was read back with a real size.
+func TestInstallHotspotPortalFetchesAndVerifies(t *testing.T) {
+	var commands []string
+	server := portalStub(t, &commands, "hotspot", "597")
+	defer server.Close()
+
+	result, err := installerClient(t, server).InstallHotspotPortal(
+		context.Background(), "http://10.0.0.5/portal/router-login.html")
+	if err != nil {
+		t.Fatalf("InstallHotspotPortal: %v", err)
+	}
+	if !result.Verified {
+		t.Fatalf("a successful install was not marked verified: %+v", result)
+	}
+	if result.Size != 597 {
+		t.Errorf("Size = %d, want 597", result.Size)
+	}
+	if result.DestPath != "hotspot/login.html" {
+		t.Errorf("DestPath = %q, want hotspot/login.html", result.DestPath)
+	}
+
+	joined := strings.Join(commands, "\n")
+	// The fetch has to carry the URL, the destination and mode=http; without
+	// the mode the router may attempt TLS against a plain panel.
+	//
+	// /tool/fetch is a plain action rather than an "add", so the REST transport
+	// posts to it instead of putting; the assertion follows what the transport
+	// actually does rather than what it looks like it should do.
+	for _, want := range []string{
+		"POST /rest/tool/fetch",
+		`"url":"http://10.0.0.5/portal/router-login.html"`,
+		`"dst-path":"hotspot/login.html"`,
+		`"mode":"http"`,
+		"GET /rest/file",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the install did not issue %q: %v", want, commands)
+		}
+	}
+}
+
+// TestInstallHotspotPortalUsesTheDeviceDirectory is the part that makes an
+// install stick. Writing to an assumed "hotspot" while the device serves its
+// pages from somewhere else changes nothing, and that is exactly the kind of
+// thing that makes a portal work once and then appear to revert.
+func TestInstallHotspotPortalUsesTheDeviceDirectory(t *testing.T) {
+	var commands []string
+	server := portalStub(t, &commands, "my-pages", "597")
+	defer server.Close()
+
+	result, err := installerClient(t, server).InstallHotspotPortal(
+		context.Background(), "http://10.0.0.5/portal/router-login.html")
+	if err != nil {
+		t.Fatalf("InstallHotspotPortal: %v", err)
+	}
+	if result.HTMLDirectory != "my-pages" {
+		t.Errorf("HTMLDirectory = %q, want the value the device reported", result.HTMLDirectory)
+	}
+	if result.DestPath != "my-pages/login.html" {
+		t.Errorf("DestPath = %q, want my-pages/login.html", result.DestPath)
+	}
+}
+
+// TestInstallHotspotPortalReportsAFailedFetch is the reason this function reads
+// the file back. A device can accept /tool/fetch and still leave no usable file,
+// and reporting that as a success is what sends an operator off testing a phone
+// instead of reading a message.
+func TestInstallHotspotPortalReportsAFailedFetch(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		size  string
+		words string
+	}{
+		{"file missing", "", "no file exists"},
+		{"file empty", "0", "is empty"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var commands []string
+			server := portalStub(t, &commands, "hotspot", tc.size)
+			defer server.Close()
+
+			result, err := installerClient(t, server).InstallHotspotPortal(
+				context.Background(), "http://10.0.0.5/portal/router-login.html")
+			// The install must not hard-fail: the operator still needs the
+			// explanation, and the built-in portal keeps working meanwhile.
+			if err != nil {
+				t.Fatalf("InstallHotspotPortal returned an error instead of a report: %v", err)
+			}
+			if result.Verified {
+				t.Error("an install that wrote no file was reported as verified")
+			}
+			if !strings.Contains(strings.Join(result.Steps, " "), tc.words) {
+				t.Errorf("the steps do not explain the failure: %v", result.Steps)
+			}
+		})
+	}
+}
+
+// TestHotspotPortalStateIsReadOnly proves the check changes nothing on the
+// device: an operator must be able to ask "is it still installed?" safely.
+func TestHotspotPortalStateIsReadOnly(t *testing.T) {
+	var commands []string
+	server := portalStub(t, &commands, "hotspot", "597")
+	defer server.Close()
+
+	result, err := installerClient(t, server).HotspotPortalState(context.Background())
+	if err != nil {
+		t.Fatalf("HotspotPortalState: %v", err)
+	}
+	if !result.Verified || result.Size != 597 {
+		t.Errorf("state did not report the installed file: %+v", result)
+	}
+	for _, command := range commands {
+		if !strings.HasPrefix(command, "GET ") {
+			t.Errorf("the check issued a write: %s", command)
+		}
+	}
+}
+
+// TestParseRouterOSSizeRefusesRubbish keeps a malformed size from being read as a
+// successful install.
+func TestParseRouterOSSizeRefusesRubbish(t *testing.T) {
+	for _, value := range []string{"", "  ", "abc", "-5", "1.5"} {
+		if got := parseRouterOSSize(value); got != 0 {
+			t.Errorf("parseRouterOSSize(%q) = %d, want 0", value, got)
+		}
+	}
+	if got := parseRouterOSSize(" 597 "); got != 597 {
+		t.Errorf("parseRouterOSSize(597) = %d, want 597", got)
+	}
+}
+
 func TestHotspotInstallerFormValidation(t *testing.T) {
 	valid := newHotspotInstallerForm()
 	valid.Interface = "bridge1-HS"

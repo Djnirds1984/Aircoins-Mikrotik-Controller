@@ -4,11 +4,179 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
 	"net/http"
 	"net/netip"
+	"strconv"
 	"strings"
 )
+
+// RouterOS menus used to put this controller's portal in front of guests.
+const (
+	toolFetchMenu = "/tool/fetch"
+	fileMenu      = "/file"
+	// defaultHotspotHTMLDirectory is where a stock RouterOS hotspot keeps its
+	// pages. It is only a fallback: the device's own setting is authoritative.
+	defaultHotspotHTMLDirectory = "hotspot"
+)
+
+// PortalInstallResult reports what the device did with the portal page.
+type PortalInstallResult struct {
+	// HTMLDirectory is where this hotspot actually reads its pages, read from
+	// the device rather than assumed. Getting this wrong is why a fetch can
+	// report success and change nothing.
+	HTMLDirectory string
+	// DestPath is the file the page was written to.
+	DestPath string
+	// Size is the size of that file afterwards, in bytes. Zero means nothing
+	// usable was written.
+	Size int64
+	// Verified reports that the file exists on the device and is not empty,
+	// which is the only evidence that the change actually took.
+	Verified bool
+	// Steps is the human readable trace shown in the panel.
+	Steps []string
+}
+
+// hotspotLoginPath returns the destination for the redirect page inside a
+// hotspot's html directory.
+func hotspotLoginPath(directory string) string {
+	directory = strings.Trim(strings.TrimSpace(directory), "/")
+	if directory == "" {
+		directory = defaultHotspotHTMLDirectory
+	}
+	return directory + "/login.html"
+}
+
+// HotspotPortalState reports what login page the device is currently serving.
+//
+// It is a read, so an operator can answer "is the redirect still installed?"
+// without changing anything. This is the check that turns "it worked once" into
+// a fact.
+func (c *MikrotikClient) HotspotPortalState(ctx context.Context) (PortalInstallResult, error) {
+	result := PortalInstallResult{}
+
+	directory, err := c.hotspotHTMLDirectory(ctx)
+	if err != nil {
+		return result, err
+	}
+	result.HTMLDirectory = directory
+	result.DestPath = hotspotLoginPath(directory)
+
+	reply, err := c.Run(ctx, fileMenu+"/print", "?name="+result.DestPath)
+	if err != nil {
+		return result, err
+	}
+	row := reply.First()
+	if row == nil {
+		result.Steps = append(result.Steps,
+			"No file at "+result.DestPath+": the router is serving its own login page.")
+		return result, nil
+	}
+	result.Size = parseRouterOSSize(row["size"])
+	result.Verified = result.Size > 0
+	if result.Verified {
+		result.Steps = append(result.Steps,
+			"Found "+result.DestPath+" ("+humanBytes(result.Size)+").")
+	}
+	return result, nil
+}
+
+// InstallHotspotPortal makes the device serve this controller's portal.
+//
+// It reads the device's own html-directory rather than assuming one, fetches
+// the redirect page into it, and then reads the file back. The read-back is the
+// point: /tool/fetch can report success while writing nothing useful (a wrong
+// path, a device that cannot reach the panel, a file that lands in RAM and is
+// lost on reboot), and an operator needs to see that rather than infer it from
+// a phone.
+func (c *MikrotikClient) InstallHotspotPortal(ctx context.Context, url string) (PortalInstallResult, error) {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return PortalInstallResult{}, errors.New("handlers: no portal page URL to install")
+	}
+
+	directory, err := c.hotspotHTMLDirectory(ctx)
+	if err != nil {
+		return PortalInstallResult{}, err
+	}
+	dest := hotspotLoginPath(directory)
+	result := PortalInstallResult{
+		HTMLDirectory: directory,
+		DestPath:      dest,
+		Steps:         []string{"This hotspot serves its pages from " + directory + "/"},
+	}
+
+	// mode=http keeps the router from attempting TLS against a plain panel,
+	// which is a common reason a fetch produces nothing useful.
+	if _, err := c.Run(ctx, toolFetchMenu,
+		"=url="+url, "=dst-path="+dest, "=mode=http"); err != nil {
+		result.Steps = append(result.Steps, "The device could not fetch the page: "+err.Error())
+		return result, err
+	}
+	result.Steps = append(result.Steps, "Fetched "+url)
+
+	reply, err := c.Run(ctx, fileMenu+"/print", "?name="+dest)
+	if err != nil {
+		return result, err
+	}
+	row := reply.First()
+	if row == nil {
+		result.Steps = append(result.Steps,
+			"The device accepted the fetch but no file exists at "+dest+
+				" - guests will still see the built-in MikroTik page.")
+		return result, nil
+	}
+	result.Size = parseRouterOSSize(row["size"])
+	result.Verified = result.Size > 0
+	if result.Verified {
+		result.Steps = append(result.Steps, "Verified "+dest+" ("+humanBytes(result.Size)+")")
+	} else {
+		result.Steps = append(result.Steps,
+			"The file at "+dest+" is empty - the panel was probably unreachable from the router.")
+	}
+	return result, nil
+}
+
+// hotspotHTMLDirectory reports where the device keeps its hotspot pages.
+//
+// /ip/hotspot (the server) and /ip/hotspot/profile (what it inherits) both
+// carry the setting, and the server's own value is what wins. A build that
+// never set it falls back to the stock "hotspot" directory.
+func (c *MikrotikClient) hotspotHTMLDirectory(ctx context.Context) (string, error) {
+	for _, menu := range []string{hotspotServerMenu, hotspotServerProfileMenu} {
+		reply, err := c.Run(ctx, menu+"/print")
+		if err != nil {
+			// An older build may not have the menu at all; try the next one and
+			// finally fall back rather than failing the whole install.
+			continue
+		}
+		row := reply.First()
+		if row == nil {
+			continue
+		}
+		for _, key := range []string{"html-directory-override", "html-directory"} {
+			if dir := strings.TrimSpace(row[key]); dir != "" {
+				return dir, nil
+			}
+		}
+	}
+	return defaultHotspotHTMLDirectory, nil
+}
+
+// parseRouterOSSize reads the size field /file/print reports, which is a plain
+// number of bytes. An unparsable value reads as zero, so the caller treats the
+// file as empty rather than claiming a false success.
+func parseRouterOSSize(value string) int64 {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	size, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || size < 0 {
+		return 0
+	}
+	return size
+}
 
 // HotspotInstallSpec describes the network choices made by /ip/hotspot setup.
 // DNS servers and WalledGardenHost are optional: the installer only changes

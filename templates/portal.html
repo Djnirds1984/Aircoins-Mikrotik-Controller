@@ -28,6 +28,9 @@
         </dl>
       {{end}}
       {{if .Notice}}<p class="hint">{{.Notice}}</p>{{end}}
+      <div class="btn-row" style="margin-top:12px">
+        <a class="btn primary" href="/portal/session">View session timer</a>
+      </div>
       {{if .RedirectTo}}
         <p><a class="btn primary" href="{{.RedirectTo}}">Continue browsing</a></p>
       {{else if .FallbackLink}}

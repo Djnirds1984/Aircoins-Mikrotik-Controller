@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -354,6 +355,11 @@ func (h *Handler) adminRoutes() *http.ServeMux {
 	mux.HandleFunc("GET /portal/login", h.PortalLogin)
 	mux.HandleFunc("POST /portal/login", h.PortalAuthenticate)
 	mux.HandleFunc("GET /portal/status", h.PortalStatus)
+	// The guest's own session clock. It is a public path like the rest of the
+	// portal: a customer has to be able to see it before signing in, and it
+	// only ever reports the session belonging to the address making the
+	// request.
+	mux.HandleFunc("GET "+portalStatusPagePath, h.PortalStatusPage)
 
 	// The stored portal background photo. Public, because the guest facing
 	// pages fetch it before anyone has signed in.
@@ -719,21 +725,43 @@ func (h *Handler) voucherIDPath(w http.ResponseWriter, r *http.Request) (int64, 
 
 // clientIP returns the best guess of the client address, honouring the proxy
 // headers set by the reverse proxy in front of the controller.
+//
+// The result is always canonicalised. Go's net.Listener accepts IPv4 on a
+// dual-stack socket, so an IPv4 guest reaches us as "::ffff:10.0.0.5" in
+// RemoteAddr. The hotspot, meanwhile, reports that client as the plain
+// "10.0.0.5". Comparing the two directly never matches, which is what stopped
+// the "you are online" page and the session timer from ever recognising a
+// returning guest. Unmapping puts both sides in the same form.
 func clientIP(r *http.Request) string {
 	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
 		if first, _, found := strings.Cut(forwarded, ","); found {
-			return strings.TrimSpace(first)
+			return canonicalClientIP(first)
 		}
-		return strings.TrimSpace(forwarded)
+		return canonicalClientIP(forwarded)
 	}
 	if real := r.Header.Get("X-Real-IP"); real != "" {
-		return strings.TrimSpace(real)
+		return canonicalClientIP(real)
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		return canonicalClientIP(r.RemoteAddr)
 	}
-	return host
+	return canonicalClientIP(host)
+}
+
+// canonicalClientIP normalises a client address, returning the trimmed input
+// when it is not an IP literal (a unix socket path, say).
+func canonicalClientIP(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if addr, err := netip.ParseAddr(value); err == nil {
+		// Unmap turns ::ffff:10.0.0.5 into 10.0.0.5 and leaves a real IPv6
+		// address alone.
+		return addr.Unmap().String()
+	}
+	return value
 }
 
 func truncateText(s string, max int) string {
