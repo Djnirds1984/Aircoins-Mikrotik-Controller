@@ -97,6 +97,10 @@ func (h *Handler) coinPortalFor(r *http.Request, request portalRequest) coinPort
 	coin.RemainingSeconds = credit.RemainingSeconds()
 	coin.SessionLabel = database.FormatCoinSeconds(credit.RemainingSeconds())
 	coin.MoneyLabel = fmt.Sprintf("%.2f", float64(credit.AmountCents)/100)
+	coin.AmountCents = credit.AmountCents
+	// Whole minutes, floored: the kiosk's "Points" field is an integer, and
+	// rounding 119 seconds up to 2 would promise a minute it cannot deliver.
+	coin.Points = credit.RemainingSeconds() / 60
 	return coin
 }
 

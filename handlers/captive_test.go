@@ -63,6 +63,20 @@ const (
 	testAdminPass = "correct-horse-battery"
 )
 
+// captivePortalMarker identifies the guest-facing captive portal document.
+//
+// These tests used to match page copy ("Free Wi-Fi", "Connect to the
+// internet"). That made the landing page's wording load-bearing: the kiosk
+// redesign changed the wording, and five unrelated end-to-end tests failed
+// because of a heading. The intent of every one of them is "this guest got the
+// portal, not the operator panel", so they now key on a structural attribute
+// the template carries for exactly that purpose.
+const captivePortalMarker = `data-page="captive-portal"`
+
+// captiveOnlineMarker identifies the portal's connected state, for the same
+// reason: it is a structural attribute rather than the word "online".
+const captiveOnlineMarker = `data-connected="true"`
+
 // signInAt walks the real login form so the session cookie is issued exactly
 // the way it is in production, CSRF token and all.
 //
@@ -147,7 +161,7 @@ func TestRootServesCaptivePortalAndAdminHidesThePanel(t *testing.T) {
 	base, _ := newCaptiveE2E(t, Config{})
 
 	root := getBody(t, signedInBrowser(t, base), base+"/")
-	if !strings.Contains(root, "Free Wi-Fi") {
+	if !strings.Contains(root, captivePortalMarker) {
 		t.Errorf("GET / did not render the captive portal landing page")
 	}
 	if !strings.Contains(root, `href="/admin/"`) {
@@ -163,7 +177,7 @@ func TestRootServesCaptivePortalAndAdminHidesThePanel(t *testing.T) {
 	if !strings.Contains(panel, "Routers</a>") {
 		t.Error("GET /admin/ did not render the operator dashboard")
 	}
-	if strings.Contains(panel, "Free Wi-Fi") {
+	if strings.Contains(panel, captivePortalMarker) {
 		t.Error("the operator dashboard rendered the captive portal")
 	}
 }
@@ -257,7 +271,7 @@ func TestRootForwardsHotspotParametersToSignIn(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	body := readAll(t, resp)
-	if strings.Contains(body, "Free Wi-Fi") {
+	if strings.Contains(body, captivePortalMarker) {
 		t.Error("a redirected hotspot client got the landing page instead of the sign-in form")
 	}
 	if !strings.Contains(body, `name="voucher"`) {
@@ -297,14 +311,22 @@ func TestCaptivePortalGreetsAnOnlineClient(t *testing.T) {
 	}
 
 	body := getBody(t, http.DefaultClient, base+"/")
-	if !strings.Contains(body, "You are online") {
+	if !strings.Contains(body, captiveOnlineMarker) {
 		t.Error("a client with a live session was not greeted as online")
 	}
 	if !strings.Contains(body, "guest-7") {
 		t.Error("the online page does not show who is signed in")
 	}
-	if strings.Contains(body, "Free Wi-Fi") {
-		t.Error("an online client was still shown the sign-in page")
+	// The sign-in affordances must be gone for a connected client. Offering
+	// someone who is already online an "Insert coin" button is how a kiosk
+	// talks a customer into paying twice for time they already have, so this is
+	// asserted on the actual controls rather than on the document type - both
+	// states render the same page.
+	if strings.Contains(body, `name="voucher"`) {
+		t.Error("an online client was still offered the voucher form")
+	}
+	if strings.Contains(body, `id="coin-tab"`) {
+		t.Error("an online client was still offered the coin slot")
 	}
 }
 
@@ -319,7 +341,7 @@ func TestDashboardAtRootRestoresTheLegacyLayout(t *testing.T) {
 		t.Error("DASHBOARD_AT_ROOT did not put the dashboard back on /")
 	}
 	portal := getBody(t, http.DefaultClient, base+"/portal")
-	if !strings.Contains(portal, "Free Wi-Fi") {
+	if !strings.Contains(portal, captivePortalMarker) {
 		t.Error("the captive portal is not reachable at /portal with DASHBOARD_AT_ROOT")
 	}
 }
@@ -332,7 +354,7 @@ func TestAdminPathIsConfigurable(t *testing.T) {
 	if body := getBody(t, signedInBrowserAt(t, base, "/panel"), base+"/panel/"); !strings.Contains(body, "Routers</a>") {
 		t.Error("a trailing slash in ADMIN_PATH broke the panel mount")
 	}
-	if body := getBody(t, http.DefaultClient, base+"/"); !strings.Contains(body, "Free Wi-Fi") {
+	if body := getBody(t, http.DefaultClient, base+"/"); !strings.Contains(body, captivePortalMarker) {
 		t.Error("the captive portal did not stay on / with a custom ADMIN_PATH")
 	}
 }
@@ -344,7 +366,7 @@ func TestCaptivePortalSurvivesAnUnresolvableRouter(t *testing.T) {
 	base, _ := newCaptiveE2E(t, Config{})
 
 	body := getBody(t, http.DefaultClient, base+"/")
-	if !strings.Contains(body, "Free Wi-Fi") {
+	if !strings.Contains(body, captivePortalMarker) {
 		t.Error("the landing page failed without a registered router")
 	}
 	if !strings.Contains(body, "Staff") {

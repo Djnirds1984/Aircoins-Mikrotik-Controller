@@ -39,6 +39,13 @@ type captivePage struct {
 	Branding portalBranding
 	// Coin is the state of the "Insert coin" tab.
 	Coin coinPortal
+	// Clock is the big timer under the status title. ClockMode says which way
+	// it runs: "up" for a connected session counting its own time online, "down"
+	// for the credit a customer is about to spend, and "" when there is nothing
+	// to show yet (a guest who has inserted nothing).
+	Clock        countdownParts
+	ClockSeconds int
+	ClockMode    string
 }
 
 // coinPortal is everything the guest's coin tab needs.
@@ -72,6 +79,14 @@ type coinPortal struct {
 	// MoneyLabel is the amount inserted so far, for the operator-facing
 	// reconciliation on the guest's own screen.
 	MoneyLabel string
+	// AmountCents is the same figure in the smallest currency unit. It is what
+	// the coin poller seeds itself from, so the rendered amount is not
+	// repainted as 0.00 before the first poll comes back.
+	AmountCents int64
+	// Points is the credit expressed in whole minutes - the same number the
+	// kiosk's "Points" field shows. It is a display alias for RemainingSeconds,
+	// kept so the template never has to do the division itself.
+	Points int
 	// IdleMinutes is how long an unspent balance survives, so the tab can set
 	// the customer's expectation instead of leaving a coin to evaporate.
 	IdleMinutes int
@@ -119,6 +134,19 @@ func (h *Handler) PortalIndex(w http.ResponseWriter, r *http.Request) {
 		view.OnlineUser = session.Username
 		view.OnlineSince = session.StartedAt.Local().Format("15:04")
 		view.OnlineUsed = durationLabel(session.Duration())
+		// The big clock counts a live session UP. It is measured from
+		// StartedAt rather than from session.Duration(), which ends at
+		// LastSeenAt: that value only advances when a device poll lands, so a
+		// clock built on it would visibly stutter between polls.
+		view.ClockSeconds = secondsSince(session.StartedAt)
+		view.Clock = splitCountdown(view.ClockSeconds)
+		view.ClockMode = "up"
+	} else if view.Coin.RemainingSeconds > 0 {
+		// Not connected yet, but the customer has already paid: show the credit
+		// counting DOWN towards zero, because that is what pressing "Done" does.
+		view.ClockSeconds = view.Coin.RemainingSeconds
+		view.Clock = splitCountdown(view.ClockSeconds)
+		view.ClockMode = "down"
 	}
 
 	h.render(w, r, http.StatusOK, "captive.html", view)

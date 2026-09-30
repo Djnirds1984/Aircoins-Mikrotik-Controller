@@ -77,7 +77,12 @@ func TestCaptiveProbePathsShowThePortal(t *testing.T) {
 			if strings.Contains(body, `name="csrf_token"`) && strings.Contains(body, "Operator name") {
 				t.Errorf("GET %s served the panel login form instead of the captive portal", path)
 			}
-			if !strings.Contains(body, "Connect to the internet") && !strings.Contains(body, "Free Wi-Fi") {
+			// Keyed on the kiosk shell, which is a structural marker rather than
+			// page copy: an earlier version of this test matched the words
+			// "Free Wi-Fi" / "Connect to the internet", so any copy edit to the
+			// landing page failed a test that was only ever trying to prove the
+			// guest got the portal and not the panel.
+			if !strings.Contains(body, `class="kiosk-shell"`) {
 				t.Errorf("GET %s did not serve the captive portal", path)
 			}
 		})

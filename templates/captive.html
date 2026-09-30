@@ -2,72 +2,490 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{{default .Branding.HeaderName .PortalName}}</title>
 <meta name="robots" content="noindex, nofollow">
 {{template "styles" .}}
 <style>{{.Branding.ThemeCSS}}</style>
-</head>
-<body class="portal"{{if .Branding.BackgroundURL}} style="background-image:linear-gradient(var(--bg-scrim),var(--bg-scrim)),url('{{.Branding.BackgroundURL}}');background-size:cover;background-position:center"{{end}}>
-<main class="portal-wrap portal-wide">
-  <div class="portal-card">
-    <div class="brand"><span class="mark">A</span><span>{{.Branding.HeaderName}}</span></div>
+<style>
+/* ==========================================================================
+   The piso Wi-Fi kiosk layout.
 
+   Everything is scoped under .kiosk so it cannot leak into the operator panel
+   or the other guest pages, which still use the shared .portal-card look.
+
+   The palette is deliberately fixed rather than inherited from the PORTAL
+   themes: a kiosk is read at arm's length, often in a dim hallway, and the
+   "is this person online" reading has to be identical on every machine in the
+   fleet. A tenant's theme may redefine --accent, so the signal colours below
+   are hard-coded.
+   ========================================================================== */
+.kiosk{
+  --k-bg:#070b11;
+  --k-panel:#0f1620;
+  --k-panel-2:#141d29;
+  --k-line:#1e2a3a;
+  --k-text:#e8f0fb;
+  --k-muted:#8ea3bf;
+  --k-teal:#22e0d6;          /* INSERT COIN: the one thing that does something */
+  --k-teal-dim:#0e9a94;
+  --k-red:#e5484d;           /* PAUSE */
+  --k-grey:#2b3646;          /* the neutral stack */
+  --k-grey-hi:#3a485c;
+  background-color:var(--k-bg);
+  color:var(--k-text);
+  font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;
+}
+/* The shared stylesheet centres .portal with flex; the kiosk owns the whole
+   viewport instead, so the card fills the phone edge to edge. */
+body.kiosk{
+  display:block; min-height:100dvh; margin:0;
+  background-color:var(--k-bg);
+  background-size:cover; background-position:center;
+}
+.kiosk-shell{
+  width:100%; max-width:520px; margin:0 auto; min-height:100dvh;
+  display:flex; flex-direction:column;
+  background:linear-gradient(180deg,rgba(7,11,17,.86),rgba(7,11,17,.96));
+}
+
+/* ---- banner ------------------------------------------------------------ */
+/* The reference page is a full-bleed game header. The operator's PORTAL
+   background is used when one is set; otherwise a CSS-only stand-in keeps the
+   page from looking broken, because a captive portal is often the very first
+   thing a guest ever sees. */
+.kiosk-banner{
+  position:relative;
+  min-height:132px;
+  display:flex; align-items:flex-end; justify-content:center;
+  padding:16px 18px 14px;
+  background:
+    linear-gradient(180deg,rgba(7,11,17,.15),rgba(7,11,17,.92)),
+    repeating-linear-gradient(115deg,rgba(34,224,214,.05) 0 22px,transparent 22px 44px),
+    radial-gradient(680px 220px at 50% -30%,rgba(34,224,214,.22),transparent 70%),
+    linear-gradient(150deg,#0d1622,#0a1119 60%,#0d0f18);
+  background-size:cover; background-position:center;
+  border-bottom:1px solid var(--k-line);
+  overflow:hidden;
+}
+/* Scanline sheen: the cheapest honest cue that this is the "gaming" skin. */
+.kiosk-banner::after{
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background:repeating-linear-gradient(0deg,rgba(255,255,255,.028) 0 1px,transparent 1px 3px);
+}
+.kiosk-banner h2{
+  position:relative; z-index:1; margin:0; text-align:center;
+  font-size:1.02rem; font-weight:800; letter-spacing:.22em; text-transform:uppercase;
+  color:var(--k-text); text-shadow:0 2px 12px rgba(0,0,0,.8);
+}
+.kiosk-banner .sub{
+  position:relative; z-index:1; margin:3px 0 0; text-align:center;
+  font-size:.72rem; letter-spacing:.16em; text-transform:uppercase; color:var(--k-muted);
+}
+
+/* ---- status + metadata ------------------------------------------------- */
+.kiosk-body{flex:1; padding:18px 16px 20px; display:flex; flex-direction:column; gap:14px}
+.kiosk-status{text-align:center}
+.kiosk-status .title{
+  margin:0; font-size:2.05rem; font-weight:900; letter-spacing:.1em; line-height:1.1;
+  text-transform:uppercase; color:var(--k-muted);
+}
+.kiosk-status .title.on{color:var(--k-teal); text-shadow:0 0 26px rgba(34,224,214,.42)}
+.kiosk-meta{
+  display:flex; flex-wrap:wrap; justify-content:center; gap:6px 12px;
+  margin:9px 0 0; font-size:.72rem; color:var(--k-muted);
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+.kiosk-meta span{white-space:nowrap}
+.kiosk-meta b{color:var(--k-text); font-weight:600}
+.kiosk-meta .pes{color:var(--k-teal); font-weight:700}
+.kiosk-as{margin:6px 0 0; font-size:.8rem; color:var(--k-muted)}
+.kiosk-as b{color:var(--k-text); font-weight:700}
+</style>
+</head>
+<style>
+/* ---- the clock --------------------------------------------------------- */
+/* One unbroken line of tabular figures. A counter whose width changes every
+   second is hard to read at a glance, so the units are part of the text rather
+   than separate flex items that could reflow. */
+.kiosk-clock{
+  background:linear-gradient(180deg,var(--k-panel-2),var(--k-panel));
+  border:1px solid var(--k-line); border-radius:14px;
+  padding:14px 10px; text-align:center;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:1.28rem; font-weight:700;
+  font-variant-numeric:tabular-nums; color:var(--k-text);
+  text-shadow:0 0 18px rgba(34,224,214,.22);
+}
+.kiosk-clock.idle{color:var(--k-muted); text-shadow:none}
+.kiosk-clock .unit{color:var(--k-muted); font-size:.76em; font-weight:600; margin-left:.12em}
+
+/* ---- the button stack -------------------------------------------------- */
+.kiosk-actions{display:flex; flex-direction:column; gap:9px}
+.kiosk-btn{
+  -webkit-appearance:none; appearance:none;
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  width:100%; padding:14px 18px;
+  border:1px solid var(--k-line); border-radius:999px;
+  background:var(--k-grey); color:var(--k-text);
+  font:inherit; font-size:.98rem; font-weight:800;
+  letter-spacing:.09em; text-transform:uppercase;
+  text-decoration:none; cursor:pointer;
+  transition:transform .08s ease, filter .15s ease;
+}
+.kiosk-btn:active{transform:scale(.985); filter:brightness(1.12)}
+.kiosk-btn:focus-visible{outline:2px solid var(--k-teal); outline-offset:2px}
+.kiosk-btn.grey:hover{background:var(--k-grey-hi)}
+.kiosk-btn.coin{
+  background:linear-gradient(135deg,var(--k-teal),var(--k-teal-dim));
+  color:#04211f; border-color:transparent;
+  box-shadow:0 8px 26px rgba(34,224,214,.28);
+}
+.kiosk-btn.coin:hover{filter:brightness(1.06)}
+.kiosk-btn.danger{background:var(--k-red); color:#fff; border-color:transparent}
+.kiosk-btn.danger:hover{filter:brightness(1.07)}
+/* A control the controller does not implement yet. It is dimmed and says so on
+   hover rather than pretending to work, so nobody ships a kiosk with four dead
+   buttons on it. */
+.kiosk-btn[data-soon]{opacity:.6}
+.kiosk-btn[data-soon]:hover{background:var(--k-grey-hi)}
+.kiosk-btn .soon{
+  font-size:.66rem; font-weight:700; letter-spacing:.04em;
+  text-transform:none; color:var(--k-muted);
+}
+
+/* ---- voucher row ------------------------------------------------------- */
+.kiosk-voucher{display:flex; gap:8px}
+.kiosk-voucher input{
+  flex:1; min-width:0; padding:13px 16px;
+  background:#0a1017; color:var(--k-text);
+  border:1px solid var(--k-line); border-radius:999px;
+  font:inherit; font-size:1rem; letter-spacing:.14em; text-transform:uppercase;
+}
+.kiosk-voucher input::placeholder{color:#5c708c; letter-spacing:.04em; text-transform:none}
+.kiosk-voucher input:focus{outline:none; border-color:var(--k-teal); box-shadow:0 0 0 3px rgba(34,224,214,.15)}
+.kiosk-voucher button{
+  flex:0 0 auto; padding:13px 20px;
+  background:var(--k-grey-hi); color:var(--k-text);
+  border:1px solid var(--k-line); border-radius:999px;
+  font:inherit; font-size:.86rem; font-weight:800;
+  letter-spacing:.11em; text-transform:uppercase; cursor:pointer;
+}
+.kiosk-voucher button:hover{filter:brightness(1.12)}
+
+
+
+/* ---- the embedded coin tab, restyled for the kiosk --------------------- */
+.kiosk .coin{
+  margin-top:0; padding:14px 12px;
+  background:var(--k-panel); border:1px solid var(--k-line); border-radius:14px;
+}
+.kiosk .coin h2{display:none}          /* the stack already says INSERT COIN */
+.kiosk .coin .sub{margin:0 0 10px; font-size:.76rem}
+.kiosk .coin-readout{margin:0 0 10px}
+.kiosk .coin-cell{background:var(--k-panel-2); padding:10px 8px}
+.kiosk .coin-cell .value{font-size:1.15rem}
+.kiosk .btn.primary{
+  background:linear-gradient(135deg,var(--k-teal),var(--k-teal-dim));
+  color:#04211f; border-color:transparent; font-weight:800;
+  border-radius:999px; letter-spacing:.07em; text-transform:uppercase;
+}
+.kiosk .hint{color:var(--k-muted); font-size:.76rem; text-align:center}
+.kiosk .editor{border-color:var(--k-line)}
+.kiosk .editor summary{color:var(--k-muted)}
+
+/* ---- support bubble ---------------------------------------------------- */
+.kiosk-chat{
+  position:fixed; right:16px; bottom:18px; z-index:40;
+  width:54px; height:54px; display:grid; place-items:center;
+  background:linear-gradient(135deg,var(--k-teal),var(--k-teal-dim));
+  color:#04211f; border:none; border-radius:50%; cursor:pointer;
+  box-shadow:0 10px 28px rgba(0,0,0,.5);
+  font:inherit; padding:0;
+}
+.kiosk-chat svg{width:26px; height:26px; fill:currentColor}
+.kiosk-chat:focus-visible{outline:2px solid var(--k-text); outline-offset:3px}
+.kiosk-pop{
+  position:fixed; right:16px; bottom:82px; z-index:39;
+  width:min(280px,calc(100vw - 32px));
+  padding:14px 16px; border-radius:14px;
+  background:var(--k-panel-2); border:1px solid var(--k-line);
+  box-shadow:0 16px 40px rgba(0,0,0,.6);
+  font-size:.82rem; color:var(--k-muted);
+}
+.kiosk-pop[hidden]{display:none}
+.kiosk-pop strong{display:block; color:var(--k-text); font-size:.9rem; margin-bottom:4px}
+
+/* ---- rates ------------------------------------------------------------- */
+.kiosk-rates{
+  background:var(--k-panel); border:1px solid var(--k-line); border-radius:14px;
+  padding:12px 14px; font-size:.82rem; color:var(--k-muted);
+}
+.kiosk-rates[hidden]{display:none}
+.kiosk-rates b{color:var(--k-teal)}
+
+/* ---- footer ------------------------------------------------------------ */
+.kiosk-foot{
+  padding:14px 16px calc(18px + env(safe-area-inset-bottom));
+  text-align:center; font-size:.72rem; color:var(--k-muted);
+  border-top:1px solid var(--k-line);
+}
+.kiosk-foot a{color:var(--k-muted)}
+
+/* ---- phones ------------------------------------------------------------ */
+@media (max-width:420px){
+  .kiosk-banner{min-height:108px}
+  .kiosk-status .title{font-size:1.72rem}
+  .kiosk-clock{font-size:1.08rem; padding:12px 8px}
+  .kiosk-btn{padding:13px 14px; font-size:.9rem}
+  /* On a narrow phone the input needs the full width more than the button
+     does, so the row wraps rather than squeezing the field to nothing. */
+  .kiosk-voucher{flex-wrap:wrap}
+  .kiosk-voucher input{flex:1 1 100%}
+}
+/* Landscape phone: the banner and the clock give up space first, otherwise the
+   button stack ends up below the fold. */
+@media (max-height:560px){
+  .kiosk-banner{min-height:84px; padding:10px 16px}
+  .kiosk-body{padding:12px 14px 16px; gap:10px}
+  .kiosk-status .title{font-size:1.5rem}
+  .kiosk-clock{font-size:1rem; padding:9px 8px}
+}
+@media (prefers-reduced-motion:reduce){
+  .kiosk-btn{transition:none}
+  .kiosk-btn:active{transform:none}
+}
+</style>
+</head>
+
+
+<body class="portal kiosk"{{if .Branding.BackgroundURL}} style="background-image:url('{{.Branding.BackgroundURL}}')"{{end}}>
+{{/* data-page marks this document as the captive portal. It is a structural
+     marker, not page copy: the end-to-end tests used to match words like
+     "Free Wi-Fi", which meant any copy edit to the landing page failed a test
+     that was only ever trying to prove a guest got the portal and not the
+     panel. Do not rename it casually. */}}
+<div class="kiosk-shell" data-page="captive-portal">
+
+  {{/* The banner carries the operator's uploaded photo when there is one, so
+       the kiosk is branded exactly like the rest of their portal. */}}
+  <header class="kiosk-banner"{{if .Branding.BackgroundURL}} style="background-image:linear-gradient(180deg,rgba(7,11,17,.15),rgba(7,11,17,.92)),url('{{.Branding.BackgroundURL}}')"{{end}}>
+    <div>
+      <h2>{{default .Branding.HeaderName .PortalName}}</h2>
+      {{if .RouterKnown}}<p class="sub">{{.RouterName}}</p>{{end}}
+    </div>
+  </header>
+
+  <main class="kiosk-body">
+
+    <section class="kiosk-status">
+      {{/* data-connected is the machine-readable half of the same state the
+           title shows in words. */}}
+      <h1 class="title{{if .Online}} on{{end}}" id="kiosk-status-title" data-connected="{{.Online}}">
+        {{if .Online}}Connected{{else}}Login{{end}}
+      </h1>
+      {{/* Who is signed in. The kiosk metadata line is deliberately about the
+           device (MAC/IP/coins/points), so the account is surfaced here
+           instead - otherwise a shared machine's next user has no way to tell
+           whose session they are looking at. */}}
+      {{if .Online}}<p class="kiosk-as">Signed in as <b>{{.OnlineUser}}</b> since {{.OnlineSince}}</p>{{end}}
+      <p class="kiosk-meta">
+        {{if .Portal.MAC}}<span>MAC <b>{{.Portal.MAC}}</b></span>{{end}}
+        {{if .Portal.IP}}<span>IP <b>{{.Portal.IP}}</b></span>{{end}}
+        <span>COINS <b class="pes">&#8369;{{if .Coin.MoneyLabel}}{{.Coin.MoneyLabel}}{{else}}0.00{{end}}</b></span>
+        <span>POINTS <b>{{.Coin.Points}}</b></span>
+      </p>
+    </section>
+
+    {{/* Rendered server side so the figure is right the instant the page loads;
+         the script below keeps it moving from there. "up" for a live session,
+         "down" for credit the customer is about to spend. */}}
+    <div class="kiosk-clock{{if not .ClockMode}} idle{{end}}" id="kiosk-clock"
+         data-mode="{{.ClockMode}}" data-seconds="{{.ClockSeconds}}">
+      {{if .ClockMode}}{{.Clock}}{{else}}0D. 00HR. 00MIN. 00SEC.{{end}}
+    </div>
+
+    {{/* Everything below this point is how a guest GETS online: the action
+         stack, the rates, the voucher field and the coin panel. A client that
+         already holds a session is none of those things, and offering a
+         connected customer an "Insert coin" button is how a kiosk convinces
+         someone to pay twice for time they already have. */}}
     {{if .Online}}
-      <h1>You are online</h1>
-      <p class="sub">This device is connected and browsing.</p>
-      <dl class="kv">
-        <dt>Signed in as</dt><dd class="mono">{{.OnlineUser}}</dd>
-        <dt>Connected at</dt><dd>{{.OnlineSince}}</dd>
-        <dt>Time online</dt><dd>{{.OnlineUsed}}</dd>
-      </dl>
-      <p class="hint" style="margin-top:14px">You can close this page and open any website.</p>
-      <div class="btn-row" style="margin-top:14px">
-        <a class="btn primary" href="/portal/session">View session timer</a>
-        <a class="btn" href="/">Refresh</a>
-        {{if .Portal.LinkOrig}}<a class="btn" href="{{.Portal.LinkOrig}}">Continue browsing</a>{{end}}
+      <p class="hint">You are online. You can close this page and open any website.</p>
+      <div class="kiosk-actions">
+        <a class="kiosk-btn coin" href="/portal/session">View session timer</a>
+        {{if .Portal.LinkOrig}}
+          <a class="kiosk-btn grey" href="{{.Portal.LinkOrig}}">Continue browsing</a>
+        {{end}}
       </div>
     {{else}}
-      <h1>Free Wi-Fi</h1>
-      <p class="sub">{{.Tagline}}</p>
+    <div class="kiosk-actions">
+      {{/* A free-time giveaway is not something the controller implements, so
+           this button is marked data-soon: the script says so rather than
+           letting it fail silently. Drop the attribute once a promo flow
+           exists. */}}
+      <button class="kiosk-btn grey" type="button" data-soon>
+        Claim free time <span class="soon">(coming soon)</span>
+      </button>
 
-      <p><a class="btn primary btn-block" href="{{.LoginURL}}">Connect to the internet</a></p>
+      {{/* The only action in the stack that is wired up. It reveals the coin
+           panel below and lets the poller take over from there. */}}
+      <button class="kiosk-btn coin" type="button" id="kiosk-coin-btn"
+              aria-controls="coin-tab" aria-expanded="false">Insert coin</button>
 
-      <details class="editor" style="margin-top:16px">
-        <summary>I already have a code</summary>
-        {{/* portalAction keeps the hotspot parameters on the form action, so a
-             code typed here is still tied to this guest's device. It falls back
-             to the bare path when the hotspot sent none. */}}
-        <form method="post" action="{{portalAction .Portal}}" style="margin-top:12px">
-          <div class="field">
-            <label for="voucher">Voucher code</label>
-            <input id="voucher" name="voucher" autocomplete="off" placeholder="AIR-XXXX-XXXX" inputmode="latin">
-          </div>
-          <div class="btn-row" style="margin-top:12px">
-            <button class="btn primary" type="submit">Connect now</button>
-          </div>
-        </form>
-      </details>
+      <button class="kiosk-btn danger" type="button" data-soon>
+        Pause <span class="soon">(coming soon)</span>
+      </button>
 
-      {{/* The Piso Wi-Fi coin slot. It sits on the landing page as well as the
-           sign-in form so a customer who has just walked up to the machine does
-           not have to pick the right tab first. */}}
-      {{template "coinTab" .}}
+      <button class="kiosk-btn grey" type="button" id="kiosk-redeem-btn">Redeem</button>
 
-      <p class="hint" style="margin-top:16px">{{.Support}}</p>
-      {{if .RouterKnown}}
-        <p class="hint">Network: <strong>{{.RouterName}}</strong></p>
+      <button class="kiosk-btn grey" type="button" id="kiosk-rates-btn"
+              aria-controls="kiosk-rates" aria-expanded="false">Wi-Fi rates</button>
+    </div>
+
+    {{/* Real data, not a decorative label: the configured rate is what actually
+         converts a coin into minutes. */}}
+    <div class="kiosk-rates" id="kiosk-rates" hidden>
+      {{if .Coin.Enabled}}
+        Each coin buys about <b>{{.Coin.SecondsPerPulseLabel}}</b> of Wi-Fi time.
+        Insert coins, then press <b>Done &mdash; Connect now</b>.
+      {{else}}
+        The coin slot is not set up on this network yet. Please ask the front
+        desk for a voucher code.
       {{end}}
-      {{if .Branding.CustomHTML}}
-        <div class="portal-extra" style="margin-top:16px">{{.Branding.CustomHTML}}</div>
-      {{end}}
+    </div>
+
+    {{/* The voucher row. portalAction keeps the hotspot parameters on the form
+         action, so a code typed here is still tied to this guest's device. It
+         falls back to the bare path when the hotspot sent none. */}}
+    <form method="post" action="{{portalAction .Portal}}" class="kiosk-voucher">
+      <input id="voucher" name="voucher" autocomplete="off" autocapitalize="characters"
+             spellcheck="false" placeholder="Voucher Here.." aria-label="Voucher code">
+      <button type="submit">Submit</button>
+    </form>
+
+
+
+    {{/* The Piso Wi-Fi coin slot, shared verbatim with the sign-in page. The
+         kiosk hides its own heading because the button stack already says
+         INSERT COIN. */}}
+    {{template "coinTab" .}}
+    {{end}}{{/* end of the not-Online branch */}}
+
+    {{if .Branding.CustomHTML}}
+      <div class="portal-extra">{{.Branding.CustomHTML}}</div>
     {{end}}
-  </div>
 
-  <p class="portal-foot">
+    <p class="hint">{{.Support}}{{if .RouterKnown}} &middot; Network: <strong>{{.RouterName}}</strong>{{end}}</p>
+
+    {{/* A discreet route to the full sign-in page, which carries the staff and
+         username login. The kiosk itself only offers the two paths a walk-up
+         customer needs - a voucher code or a coin - so without this the
+         username form would be unreachable from the landing page. */}}
+    <p class="hint"><a href="{{.LoginURL}}">Sign in with a username</a></p>
+  </main>
+
+  <footer class="kiosk-foot">
+    Powered by: {{default .Branding.HeaderName .PortalName}}. &copy; All rights reserved<br>
     <a href="{{.AdminPath}}/" rel="nofollow">Staff &amp; administration</a>
-  </p>
-</main>
+  </footer>
+</div>
+
+{{/* The support bubble opens a panel rather than linking anywhere: there is no
+     chat backend, and a dead link on a public kiosk is worse than an honest
+     panel that repeats the operator's own support line. */}}
+<button class="kiosk-chat" type="button" id="kiosk-chat" aria-expanded="false"
+        aria-controls="kiosk-pop" aria-label="Help and support">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3C6.9 3 3 6.6 3 11c0 2.4 1.2 4.6 3.2 6L5.4 21l4.3-2.1c.7.1 1.5.2 2.3.2 5.1 0 9-3.6 9-8S17.1 3 12 3zm1 13.5h-2v-2h2v2zm1.8-4.6c-.3.4-.8.6-1.3.6h-1v1.6h-2v-2.2c0-1.4 1-1.9 1.9-2.2.8-.3 1.4-.6 1.4-1.1 0-.4-.4-.7-.9-.7-.5 0-1 .3-1.3.8l-1.6-.8c.5-1 1.7-1.6 3-1.6 1.7 0 2.9 1 2.9 2.4 0 1-.5 1.5-1.1 2z"/></svg>
+</button>
+<div class="kiosk-pop" id="kiosk-pop" hidden>
+  <strong>Need help?</strong>
+  {{.Support}}
+  {{if .RouterKnown}}<br>Network: {{.RouterName}}{{end}}
+</div>
+
+<script>
+/* Kiosk behaviour: the clock, and the controls that reveal something.
+
+   Every value the Go handler rendered arrives in a data- attribute, so the
+   numbers on screen are the server's and never a guess made here. Every string
+   goes through textContent, so nothing from the network can become markup. */
+(function () {
+  var clock = document.getElementById('kiosk-clock');
+  var DAY = 86400, HOUR = 3600, MINUTE = 60;
+
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+
+  if (clock) {
+    var mode = clock.getAttribute('data-mode');
+    var value = parseInt(clock.getAttribute('data-seconds'), 10);
+    if (!isNaN(value) && mode) {
+      var step = mode === 'up' ? 1 : -1;
+      setInterval(function () {
+        value += step;
+        if (value < 0) { value = 0; }
+        var d = Math.floor(value / DAY);
+        var h = Math.floor((value % DAY) / HOUR);
+        var m = Math.floor((value % HOUR) / MINUTE);
+        var s = value % MINUTE;
+        clock.textContent = d + 'D. ' + pad(h) + 'HR. ' + pad(m) + 'MIN. ' + pad(s) + 'SEC.';
+      }, 1000);
+    }
+  }
+
+  /* Reveal a panel and keep the button's aria-expanded honest. */
+  function toggle(button, target) {
+    if (!button || !target) { return; }
+    var hidden = target.hasAttribute('hidden');
+    if (hidden) { target.removeAttribute('hidden'); } else { target.setAttribute('hidden', ''); }
+    button.setAttribute('aria-expanded', hidden ? 'true' : 'false');
+  }
+
+  var coinBtn = document.getElementById('kiosk-coin-btn');
+  var coinTab = document.getElementById('coin-tab');
+  if (coinBtn && coinTab) {
+    // The coin panel is the page's main event, so it starts open rather than
+    // hiding the balance behind a tap.
+    coinTab.removeAttribute('hidden');
+    coinBtn.setAttribute('aria-expanded', 'true');
+    coinBtn.addEventListener('click', function () {
+      coinTab.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }
+
+  var ratesBtn = document.getElementById('kiosk-rates-btn');
+  var rates = document.getElementById('kiosk-rates');
+  if (ratesBtn) {
+    ratesBtn.addEventListener('click', function () { toggle(ratesBtn, rates); });
+  }
+
+  // Redeem means "I have a code": focus the field rather than navigating, so the
+  // guest lands straight on it with their phone keyboard up.
+  var redeemBtn = document.getElementById('kiosk-redeem-btn');
+  if (redeemBtn) {
+    redeemBtn.addEventListener('click', function () {
+      var field = document.getElementById('voucher');
+      if (field) { field.focus(); field.scrollIntoView({ block: 'center' }); }
+    });
+  }
+
+  var chatBtn = document.getElementById('kiosk-chat');
+  var chatPop = document.getElementById('kiosk-pop');
+  if (chatBtn && chatPop) {
+    chatBtn.addEventListener('click', function () { toggle(chatBtn, chatPop); });
+    // A tap anywhere else dismisses the panel, which is what a phone user
+    // expects and what keeps it from covering the voucher field.
+    document.addEventListener('click', function (e) {
+      if (chatPop.hasAttribute('hidden')) { return; }
+      if (chatPop.contains(e.target) || chatBtn.contains(e.target)) { return; }
+      chatPop.setAttribute('hidden', '');
+      chatBtn.setAttribute('aria-expanded', 'false');
+    });
+  }
+})();
+</script>
 {{template "coinScript" .}}
 </body>
 </html>
+
+

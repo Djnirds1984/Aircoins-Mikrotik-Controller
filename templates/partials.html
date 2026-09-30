@@ -312,7 +312,11 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
       </div>
       <div class="coin-cell">
         <div class="label">Inserted</div>
-        <div class="value" id="coin-amount">{{if .Coin.MoneyLabel}}{{.Coin.MoneyLabel}}{{else}}0.00{{end}}</div>
+        {{/* data-cents carries the rendered figure so the poller can seed
+             itself from it. Without it the first apply() paints a 0.00 over
+             the amount the server already knew, and the customer watches their
+             ₱20.00 briefly become ₱0.00. */}}
+        <div class="value" id="coin-amount" data-cents="{{.Coin.AmountCents}}">{{if .Coin.MoneyLabel}}{{.Coin.MoneyLabel}}{{else}}0.00{{end}}</div>
       </div>
     </div>
 
@@ -473,6 +477,9 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
   if (!enabled || !subject || !timeEl) { return; }
 
   var lastSeconds = parseInt(timeEl.getAttribute('data-seconds'), 10) || 0;
+  // Seeded from the server-rendered figure rather than zero, so the first
+  // apply() does not briefly paint 0.00 over a balance the server already knew.
+  var lastCents = amountEl ? (parseInt(amountEl.getAttribute('data-cents'), 10) || 0) : 0;
   var failures = 0;
 
   function pad(n) { return n < 10 ? '0' + n : '' + n; }
@@ -518,9 +525,11 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
       flash(timeEl);
     }
     if (amountEl) {
-      var text = money(data.amount_cents);
-      if (amountEl.textContent !== text) {
-        amountEl.textContent = text;
+      var cents = data.amount_cents || 0;
+      if (cents !== lastCents) {
+        lastCents = cents;
+        amountEl.textContent = money(cents);
+        amountEl.setAttribute('data-cents', String(cents));
         flash(amountEl);
       }
     }
@@ -576,7 +585,9 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
 
   // Poll immediately so the first paint is corrected without waiting a full
   // interval, and reflect the server-rendered value in the meantime.
-  apply({ remaining_seconds: lastSeconds, amount_cents: 0 });
+  // Paint the server-rendered state and start, so the counter is already right
+  // on first load rather than after the first round trip.
+  apply({ remaining_seconds: lastSeconds, amount_cents: lastCents });
   start();
 
   document.addEventListener('visibilitychange', function () {

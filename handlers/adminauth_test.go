@@ -381,7 +381,7 @@ func TestSignOutLandsOnTheCaptivePortal(t *testing.T) {
 	if strings.Contains(body, `name="csrf_token"`) && strings.Contains(body, "Operator name") {
 		t.Error("the portal root served the panel login form")
 	}
-	if !strings.Contains(body, "Connect to the internet") && !strings.Contains(body, "Free Wi-Fi") {
+	if !strings.Contains(body, captivePortalMarker) && !strings.Contains(body, captivePortalMarker) {
 		t.Error("the portal root did not serve the captive portal after logout")
 	}
 }

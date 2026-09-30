@@ -542,3 +542,132 @@ func TestSketchContract(t *testing.T) {
 		t.Errorf("after the retry remaining = %d, want 600 (the coin was charged once)", retry.RemainingSeconds)
 	}
 }
+
+// TestKioskLayoutRendersThePisoSkin proves the captive landing page actually
+// carries the kiosk skin, and that the pieces the Go handler is responsible for
+// are filled from the server rather than left to JavaScript.
+//
+// The design is a set of five stacked controls with specific colours and a big
+// timer. A refactor of the markup would break it silently, so the shape is
+// pinned here rather than trusted to review.
+//
+// It is requested with no query string on purpose: a hotspot that redirects a
+// client to "/" with its parameters appended is forwarded to the sign-in form
+// (portal.html), and the kiosk skin is the landing a guest sees when they open
+// the controller's address directly.
+func TestKioskLayoutRendersThePisoSkin(t *testing.T) {
+	base, _ := newCaptiveE2E(t, coinTestConfig())
+
+	resp, err := http.Get(base + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readAll(t, resp)
+
+	// The structural marker, and the state attributes the tests key on.
+	if !strings.Contains(body, captivePortalMarker) {
+		t.Errorf("the page is missing %s", captivePortalMarker)
+	}
+	if !strings.Contains(body, `data-connected="false"`) {
+		t.Error("the status title does not report its unauthenticated state")
+	}
+
+	// The five stacked controls, in the order the reference shows them.
+	stack := []string{
+		"Claim free time",
+		"Insert coin",
+		"Pause",
+		"Redeem",
+		"Wi-Fi rates",
+	}
+	previous := -1
+	for _, label := range stack {
+		at := strings.Index(body, label)
+		if at < 0 {
+			t.Errorf("the action stack is missing %q", label)
+			continue
+		}
+		if at < previous {
+			t.Errorf("%q is out of order in the action stack", label)
+		}
+		previous = at
+	}
+
+	// The colour coding: only the coin button is teal, only pause is red.
+	if !strings.Contains(body, "kiosk-btn coin") {
+		t.Error("INSERT COIN is not the highlighted teal button")
+	}
+	if !strings.Contains(body, "kiosk-btn danger") {
+		t.Error("PAUSE is not the red button")
+	}
+	// Controls the controller does not implement must say so rather than look
+	// live; a dead button on a public kiosk is a support call. Counted on the
+	// button element, not the bare attribute, or the stylesheet's
+	// [data-soon] selectors would be counted too.
+	if n := strings.Count(body, `type="button" data-soon`); n != 2 {
+		t.Errorf("%d controls are marked data-soon, want 2 (claim free time, pause)", n)
+	}
+
+	// The metadata line and the timer, filled server side.
+	for _, want := range []string{
+		"COINS",
+		"POINTS",
+		"0D. 00HR. 00MIN. 00SEC.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the kiosk page is missing %q", want)
+		}
+	}
+
+	// The voucher row and the footer, including the floating support bubble.
+	if !strings.Contains(body, `placeholder="Voucher Here.."`) {
+		t.Error("the voucher input lost its placeholder")
+	}
+	if !strings.Contains(body, "Powered by:") || !strings.Contains(body, "All rights reserved") {
+		t.Error("the footer branding line is missing")
+	}
+	if !strings.Contains(body, `class="kiosk-chat"`) {
+		t.Error("the floating support bubble is missing")
+	}
+}
+
+// TestKioskClockCountsDownTheCoinCredit proves the big timer reflects the coin
+// balance before the customer has connected, because that is the number they
+// are standing at the machine deciding on.
+//
+// A direct visit to "/" carries no MAC, so the balance is keyed on the request's
+// own address - exactly the case a kiosk hits, and the reason the store falls
+// back to an ip: subject.
+func TestKioskClockCountsDownTheCoinCredit(t *testing.T) {
+	base, _ := newCaptiveE2E(t, coinTestConfig())
+
+	// The NodeMCU credits the address the kiosk is browsing from.
+	if status, _ := postPulse(t, base, coinTestToken, map[string]any{
+		"ip": "127.0.0.1", "pulses": 4, "event_id": "kiosk-clock",
+	}); status != http.StatusOK {
+		t.Fatalf("seed credit: status %d, want 200", status)
+	}
+
+	resp, err := http.Get(base + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readAll(t, resp)
+
+	if !strings.Contains(body, `data-mode="down"`) {
+		t.Error("an unconnected client with credit should get a counting-down clock")
+	}
+	if !strings.Contains(body, `data-seconds="1200"`) {
+		t.Error("the clock did not start from the credited 20 minutes")
+	}
+	if !strings.Contains(body, "0D. 00HR. 20MIN. 00SEC.") {
+		t.Errorf("the rendered clock is not the credited 20 minutes; wanted 0D. 00HR. 20MIN. 00SEC.")
+	}
+	// Points is the same balance in whole minutes, which is what the kiosk
+	// metadata line shows.
+	if !strings.Contains(body, "<b>20</b>") {
+		t.Error("POINTS does not show the 20 credited minutes")
+	}
+}
