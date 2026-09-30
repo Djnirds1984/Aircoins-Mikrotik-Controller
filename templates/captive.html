@@ -34,7 +34,10 @@
 
       <details class="editor" style="margin-top:16px">
         <summary>I already have a code</summary>
-        <form method="post" action="/portal/login" style="margin-top:12px">
+        {{/* portalAction keeps the hotspot parameters on the form action, so a
+             code typed here is still tied to this guest's device. It falls back
+             to the bare path when the hotspot sent none. */}}
+        <form method="post" action="{{portalAction .Portal}}" style="margin-top:12px">
           <div class="field">
             <label for="voucher">Voucher code</label>
             <input id="voucher" name="voucher" autocomplete="off" placeholder="AIR-XXXX-XXXX" inputmode="latin">

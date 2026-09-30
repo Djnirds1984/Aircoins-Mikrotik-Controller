@@ -122,11 +122,26 @@ func (h *Handler) PortalAuthenticate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	request := portalRequestFromValues(r.PostForm)
-	// Hidden fields echoed back by the page must survive the round trip.
-	voucherCode := database.FormatVoucherCode(r.PostFormValue("voucher"))
-	username := strings.TrimSpace(r.PostFormValue("username"))
-	password := r.PostFormValue("password")
+	// The hotspot parameters arrive in the form ACTION's query string, not in
+	// the POST body: the sign-in form is "/portal/login?mac=...&ip=..." and the
+	// browser only puts the voucher in the body. Reading r.PostForm alone - as
+	// this did - dropped every parameter, so the guest was told the page had
+	// been opened directly even when the hotspot had redirected them properly.
+	//
+	// r.Form is the union of the query string and the body, which is what the
+	// round trip actually needs. The body still wins for the voucher itself.
+	request := portalRequestFromValues(r.Form)
+	voucherCode := database.FormatVoucherCode(r.FormValue("voucher"))
+	username := strings.TrimSpace(r.FormValue("username"))
+	password := r.FormValue("password")
+
+	// A hotspot that redirects without parameters leaves both fields empty.
+	// The guest's address is still known, though: it is the source address of
+	// this very request. Adopting it is what lets someone holding a paid
+	// voucher get online through a bare redirect.
+	if request.IP == "" {
+		request.IP = database.NormalizeIP(clientIP(r))
+	}
 
 	view := &portalPage{
 		page:         page{Title: "Sign in", Nav: ""},

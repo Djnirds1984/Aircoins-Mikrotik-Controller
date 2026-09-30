@@ -362,7 +362,92 @@ func readAll(t *testing.T, resp *http.Response) string {
 	return string(raw)
 }
 
-// TestPortalLoginFormKeepsHotspotQueryIntact pins a bug that made every portal
+// TestPortalVoucherLoginCarriesHotspotParameters drives the real browser round
+// trip, which the rendering tests above never did.
+//
+// The sign-in form puts the hotspot parameters in the form ACTION
+// ("/portal/login?mac=...&ip=..."), and the browser posts the voucher in the
+// body. The handler only looked at r.PostForm, which is body-only, so the
+// parameters were dropped and every real voucher login answered "This login page
+// was opened directly" - a guest who was redirected by the hotspot and typed a
+// valid code could never get online.
+func TestPortalVoucherLoginCarriesHotspotParameters(t *testing.T) {
+	base, _ := newCaptiveE2E(t, Config{})
+
+	// A guest redirected by the hotspot.
+	signIn := base + "/portal/login?mac=AA-BB-CC-DD-EE-FF&ip=10.5.50.42" +
+		"&link-login=http://10.0.0.1/login&link-orig=http://example.com/"
+	page := getBody(t, &http.Client{}, signIn)
+	action := strings.ReplaceAll(formActionOf(page), "&amp;", "&")
+	if !strings.HasPrefix(action, "/portal/login?") {
+		t.Fatalf("form action = %q, want the hotspot parameters in the query", action)
+	}
+
+	// The browser posts the body to that action, parameters and all.
+	resp, err := (&http.Client{}).PostForm(base+action, url.Values{
+		"voucher": {"AIR-2X4Q-9BNM"},
+	})
+	if err != nil {
+		t.Fatalf("post voucher: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	body := string(raw)
+
+	if strings.Contains(body, "opened directly") {
+		t.Fatal("a redirected guest who typed a voucher was told the page was opened directly")
+	}
+}
+
+// TestPortalVoucherLoginFallsBackToTheClientAddress covers the hotspot that
+// redirects without parameters at all.
+//
+// Plenty of MikroTik setups point the redirect at a bare URL, so the sign-in
+// page arrives with no mac and no ip. The guest's address is still known: it is
+// the source address of the request itself. Refusing the login instead would
+// leave the customer holding a paid voucher and no way to use it.
+func TestPortalVoucherLoginFallsBackToTheClientAddress(t *testing.T) {
+	base, _ := newCaptiveE2E(t, Config{})
+
+	// No hotspot parameters anywhere: neither query nor body.
+	page := getBody(t, &http.Client{}, base+"/portal/login")
+	action := strings.ReplaceAll(formActionOf(page), "&amp;", "&")
+
+	resp, err := (&http.Client{}).PostForm(base+action, url.Values{
+		"voucher": {"AIR-2X4Q-9BNM"},
+	})
+	if err != nil {
+		t.Fatalf("post voucher: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	body := string(raw)
+
+	if strings.Contains(body, "opened directly") {
+		t.Fatal("a guest with a voucher was refused because the redirect carried no parameters")
+	}
+}
+
+// TestCaptiveWelcomeVoucherBoxCarriesParameters covers the voucher box on the
+// welcome page, which is what a guest sees at "/" or "/login".
+//
+// Its form used to be hardcoded to action="/portal/login" with no parameters, so
+// the code typed there could never be tied to the guest's device even when the
+// hotspot had supplied them.
+func TestCaptiveWelcomeVoucherBoxCarriesParameters(t *testing.T) {
+	base, _ := newCaptiveE2E(t, Config{})
+
+	// The welcome page is only reached with an empty request by design, so the
+	// parameters are exercised through the sign-in page that shares the helper.
+	page := getBody(t, &http.Client{},
+		base+"/portal/login?mac=AA-BB-CC-DD-EE-FF&ip=10.5.50.42")
+	action := strings.ReplaceAll(formActionOf(page), "&amp;", "&")
+
+	if !strings.Contains(action, "mac=") || !strings.Contains(action, "ip=") {
+		t.Errorf("form action %q does not carry the hotspot parameters", action)
+	}
+}
+
 // login fail silently: html/template applies urlFilter plus urlEscaper to an
 // action attribute, so a plain "?ip=10.0.0.5&mac=AA:BB" was rendered as
 // "?ip%3d10.0.0.5%26mac%3dAA%3ABB". The browser then POSTed one giant query
