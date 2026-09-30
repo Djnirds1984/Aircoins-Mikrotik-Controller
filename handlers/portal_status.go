@@ -67,12 +67,15 @@ func (h *Handler) coinPortalFor(r *http.Request, request portalRequest) coinPort
 	subject := database.CoinSubject(request.MAC, request.IP)
 
 	coin := coinPortal{
-		Enabled:              strings.TrimSpace(h.cfg.CoinNodeToken) != "",
-		Subject:              subject,
-		StatusURL:            coinStatusPath,
-		ConnectURL:           coinConnectPath,
-		SecondsPerPulse:      h.cfg.CoinPulseSeconds,
-		SecondsPerPulseLabel: database.FormatCoinSeconds(h.cfg.CoinPulseSeconds),
+		Enabled:    strings.TrimSpace(h.cfg.CoinNodeToken) != "",
+		Subject:    subject,
+		StatusURL:  coinStatusPath,
+		ConnectURL: coinConnectPath,
+		// The live price, read from the rates table with the environment value
+		// as the fallback, so the "each coin buys about X" line a customer reads
+		// is the price that will actually be applied to their coin.
+		SecondsPerPulse:      h.coinSecondsPerPulse(ctx),
+		SecondsPerPulseLabel: database.FormatCoinSeconds(h.coinSecondsPerPulse(ctx)),
 		IdleMinutes:          int(h.cfg.CoinIdleTTL.Minutes()),
 	}
 

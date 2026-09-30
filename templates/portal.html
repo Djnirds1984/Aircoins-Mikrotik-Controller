@@ -74,9 +74,17 @@
       </details>
 
       {{/* The Piso Wi-Fi coin slot. On this page it is the alternative to typing
-           a code, so it sits directly under the voucher form rather than
-           behind another disclosure: a customer standing at the machine with a
-           coin in their hand should not have to hunt for it. */}}
+           a code, so its button sits directly under the voucher form rather
+           than behind another disclosure: a customer standing at the machine
+           with a coin in their hand should not have to hunt for it. The button
+           opens the modal rendered by coinTab; coinScript pairs them by
+           aria-controls, so the id cannot drift out of sync with the script. */}}
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn" type="button" id="coin-open-btn"
+                aria-controls="coin-modal" aria-haspopup="dialog" aria-expanded="false">
+          Insert coin
+        </button>
+      </div>
       {{template "coinTab" .}}
 
       <p class="hint" style="margin-top:14px">

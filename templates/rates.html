@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · {{.PortalName}}</title>
+<meta name="robots" content="noindex, nofollow">
+{{template "styles" .}}
+<style>
+/* The time dropdowns sit as one row of three so "1 day 2 hours" reads the way
+   an operator thinks about a session length, rather than as three unrelated
+   numbers. They stack on a phone-width screen rather than shrinking to
+   unusable widths. */
+.dhm{display:grid; gap:10px; grid-template-columns:repeat(3,1fr); margin-top:4px}
+.dhm .field{margin:0}
+@media (max-width:520px){ .dhm{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+{{template "nav" .}}
+<main class="wrap">
+  {{template "flash" .}}
+
+  <div class="page-head">
+    <div>
+      <h1>Rates</h1>
+      <p class="sub">What a coin slot charge buys. Applied the moment a coin is inserted.</p>
+    </div>
+    <div class="actions">
+      <a class="btn" href="{{.AdminPath}}/portal/login" target="_blank" rel="noopener">Preview sign-in page</a>
+    </div>
+  </div>
+
+  {{if not .NodeReady}}
+    <div class="alert warn">
+      <strong>The coin slot is not connected to this controller.</strong>
+      Set <span class="mono">COIN_NODE_TOKEN</span> and restart the service, otherwise the
+      hardware endpoint refuses every report and no coin is ever counted. The prices
+      below can still be configured now and will apply as soon as a node reports in.
+    </div>
+  {{end}}
+
+  {{with .Form.Errors.form}}<div class="alert err">{{.}}</div>{{end}}
+
+  <section class="card">
+    <h2>{{if .EditingID}}Edit rate{{else}}Add a rate{{end}}</h2>
+    <p class="hint">
+      A rate says how many pulses one coin produces, what it costs, and how much
+      Wi-Fi time it buys. The time is picked with Days, Hours and Minutes so a
+      &ldquo;1 day 2 hours&rdquo; session does not have to be typed as 1560 minutes.
+    </p>
+
+    <form method="post" action="{{.AdminPath}}/rates/save">
+      {{template "csrf" .}}
+      {{if .EditingID}}<input type="hidden" name="id" value="{{.EditingID}}">{{end}}
+
+      <div class="form-grid">
+        <div class="field">
+          <label for="label">Name <span class="muted">(optional)</span></label>
+          <input id="label" name="label" maxlength="60" autocomplete="off"
+                 placeholder="5-peso coin" value="{{.Form.Label}}">
+          {{with .Form.Errors.label}}<span class="error">{{.}}</span>{{end}}
+          <span class="muted" style="font-size:.78rem">For your reference on this page only. Customers never see it.</span>
+        </div>
+
+        <div class="field">
+          <label for="pulses">Pulses per coin</label>
+          <select id="pulses" name="pulses">
+            {{range .Pulses}}<option value="{{.}}"{{if eq (printf "%d" .) $.Form.Pulses}} selected{{end}}>{{.}}</option>{{end}}
+          </select>
+          {{with .Form.Errors.pulses}}<span class="error">{{.}}</span>{{end}}
+          <span class="muted" style="font-size:.78rem">
+            Most acceptors emit one pulse per coin. Watch the node serial log on
+            boot to confirm what yours does.
+          </span>
+        </div>
+      </div>
+
+      <div class="field" style="margin-top:12px">
+        <label for="amount">Price the customer pays (pesos)</label>
+        <input id="amount" name="amount" inputmode="decimal" autocomplete="off"
+               placeholder="5.00" value="{{.Form.Amount}}">
+        {{with .Form.Errors.amount}}<span class="error">{{.}}</span>{{end}}
+        <span class="muted" style="font-size:.78rem">
+          Recorded for your end-of-day reconciliation. The session time below is
+          what the customer actually receives.
+<fieldset style="margin-top:16px; border:1px solid var(--line); border-radius:12px; padding:14px">
+        <legend style="color:var(--muted); font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; padding:0 6px">
+          Wi-Fi time awarded
+        </legend>
+
+        {{/* Three separate dropdowns rather than one free-text field: an
+             operator picking a session length should be choosing from the
+             durations that actually exist, not computing 1560 in their head. */}}
+        <div class="dhm">
+          <div class="field">
+            <label for="days">Days</label>
+            <select id="days" name="days">
+              {{range .Days}}<option value="{{.}}"{{if eq (printf "%d" .) $.Form.Days}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+            {{with .Form.Errors.days}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="hours">Hours</label>
+            <select id="hours" name="hours">
+              {{range .Hours}}<option value="{{.}}"{{if eq (printf "%d" .) $.Form.Hours}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+            {{with .Form.Errors.hours}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="minutes">Minutes</label>
+            <select id="minutes" name="minutes">
+              {{range .Minutes}}<option value="{{.}}"{{if eq (printf "%d" .) $.Form.Minutes}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+            {{with .Form.Errors.minutes}}<span class="error">{{.}}</span>{{end}}
+          </div>
+        </div>
+
+        <label class="field check" style="margin-top:12px">
+          <input type="checkbox" name="active" value="1"{{if .Form.Active}} checked{{end}}>
+          <span><strong>Use this rate</strong><br>
+            <span class="muted" style="font-size:.8rem">
+              Clear it to keep the rate on record without pricing new coins with it.
+            </span></span>
+        </label>
+      </fieldset>
+
+      <div class="actions" style="margin-top:16px">
+        <button class="btn primary" type="submit">
+          {{if .EditingID}}Save changes{{else}}Add rate{{end}}
+        </button>
+        {{if .EditingID}}
+          <a class="btn" href="{{.AdminPath}}/rates">Cancel</a>
+        {{end}}
+      </div>
+<section class="card" style="margin-top:16px">
+    <h2>Current rates</h2>
+    <p class="hint">
+      Several active rates can run at once. A report of pulses is matched against
+      the largest tier it fits, so a higher-value coin is never priced as a
+      small one.
+    </p>
+
+    {{if .Rates}}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th class="num">Pulses</th>
+              <th class="num">Price</th>
+              <th class="num">Time awarded</th>
+              <th>Status</th>
+              <th class="num">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Rates}}
+            <tr>
+              <td>{{if .Label}}{{.Label}}{{else}}<span class="muted">unnamed tier</span>{{end}}</td>
+              <td class="num">{{.Pulses}}</td>
+              <td class="num">{{money .AmountCents}}</td>
+              <td class="num">
+                <strong>{{.TimeLabel}}</strong>
+                <div class="muted" style="font-size:.76rem">{{.GrantedSeconds}} seconds</div>
+              </td>
+              <td>
+                {{if .Active}}<span class="badge green">in use</span>{{else}}<span class="badge slate">disabled</span>{{end}}
+              </td>
+              <td class="num nowrap">
+                <a class="btn small" href="{{$.AdminPath}}/rates?edit={{.ID}}">Edit</a>
+
+                {{/* Enable and disable are separate POSTs carrying an explicit
+                     intent, rather than one toggle whose meaning is inferred
+                     from the current state. A double submit therefore cannot
+                     re-enable a tier the operator just switched off. */}}
+                {{if .Active}}
+                <form class="inline-form" method="post" action="{{$.AdminPath}}/rates/{{.ID}}/toggle">
+                  {{template "csrf" $}}
+                  <input type="hidden" name="active" value="">
+                  <button class="btn small" type="submit">Disable</button>
+                </form>
+                {{else}}
+                <form class="inline-form" method="post" action="{{$.AdminPath}}/rates/{{.ID}}/toggle">
+                  {{template "csrf" $}}
+                  <input type="hidden" name="active" value="1">
+                  <button class="btn small" type="submit">Enable</button>
+                </form>
+                {{end}}
+
+                <form class="inline-form" method="post" action="{{$.AdminPath}}/rates/{{.ID}}/delete"
+                      onsubmit="return confirm('Delete this rate permanently? Disable it instead if it has already been used.');">
+                  {{template "csrf" $}}
+                  <button class="btn small danger" type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    {{else}}
+      <div class="empty">
+        No rates configured. Coins inserted right now are priced at the
+        environment fallback of <strong>{{.FallbackSecondsLabel}}</strong> per pulse
+        (COIN_SECONDS_PER_PULSE). Add a rate above to take over.
+      </div>
+    {{end}}
+
+    <p class="hint" style="margin-top:12px">
+      The <strong>Done paying</strong> button on the customer screen provisions a
+      hotspot session for the whole credit. One connection is capped at the
+      COIN_MAX_SESSION_MINUTES setting, so a large balance is spent over several
+      presses rather than as one very long session.
+    </p>
+  </section>
+</main>
+{{template "footer" .}}
+</body>
+</html>
+
+    </form>
+  </section>
+
+        </span>
+      </div>

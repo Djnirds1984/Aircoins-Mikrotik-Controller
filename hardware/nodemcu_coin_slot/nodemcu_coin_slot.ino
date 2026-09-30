@@ -13,6 +13,19 @@
  *                            "node_id":"box-1","event_id":"box-1-lu-42"}
  *   GET  /api/coin-status?subject=...     (for the local display, if fitted)
  *
+ * The sketch does NOT decide what a coin is worth. It counts pulses and reports
+ * them; the controller prices those pulses against the tiers an operator has
+ * configured on the panel's RATES page and turns the result into a
+ * Days:Hours:Minutes session. That split is deliberate: the price is then a
+ * setting change in the browser rather than a reflash of hardware buried behind
+ * a locked cabinet, and one controller can price several boxes differently.
+ *
+ * Consequently this sketch sends "pulses", not "seconds" or "amount". The
+ * "seconds" and "amount_cents" fields still exist in the API for an acceptor
+ * with a coin recogniser that knows its own denominations, and are honoured
+ * when present - but a plain pulse counter must leave them out and let the
+ * controller price the pulses, or the two will disagree about what a coin buys.
+ *
  * ---------------------------------------------------------------------------
  * WIRING
  * ---------------------------------------------------------------------------
@@ -137,10 +150,29 @@ static const char *NODE_ID = "box-1";
 #endif
 
 // Ignore any further edge for this many milliseconds after a counted one.
-// A contact bounce lasts a few ms; two real coins are never closer together
-// than this. 60 ms sits comfortably between the two for every acceptor on the
-// market and costs nothing if it is a little generous.
-static const uint32_t DEBOUNCE_MS = 60;
+//
+// This is the single most important constant for reliable counting, and it is a
+// trade-off between two failure modes that look identical to a customer:
+//
+//   * too SHORT and one coin is counted several times (contact bounce). The
+//     customer is overcharged in time and the box looks like it is "counting
+//     coins that were never inserted";
+//   * too LONG and rapid multi-coin bursts are merged into one, so a customer
+//     who drops three coins in a row is shorted.
+//
+// A multi-coin acceptor holds its contact for roughly 20-40 ms per pulse and its
+// mechanical bounce settles inside about 15 ms, so 25 ms sits between the two:
+// long enough to swallow a bounce burst, short enough that two distinct coins
+// closer than a quarter of a second apart are still counted separately. That is
+// the window the hardware can actually deliver, and 25 ms is the middle of it.
+//
+// Raising this past roughly 40 ms starts merging coins on the faster acceptors;
+// lowering it below about 15 ms starts double-counting on the slower ones. If a
+// particular acceptor misbehaves, change this rather than adding a second,
+// boolean "ignore the next edge" flag - that flag drops a genuine second pulse
+// instead of only the bounce, which is the bug this time-window form exists to
+// avoid.
+static const uint32_t DEBOUNCE_MS = 25;
 
 // The largest number of pulses to describe in one POST. A single 5-peso coin is
 // normally 1-5 pulses, so this allows a whole handful in one report while still

@@ -159,3 +159,6 @@ func (db *DB) Vouchers() *VoucherStore { return &VoucherStore{db: db} }
 
 // Coins returns the coin-slot credit store.
 func (db *DB) Coins() *CoinStore { return &CoinStore{db: db} }
+
+// Rates returns the coin-slot pricing store.
+func (db *DB) Rates() *RateStore { return &RateStore{db: db} }

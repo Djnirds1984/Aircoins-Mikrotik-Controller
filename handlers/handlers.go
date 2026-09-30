@@ -384,6 +384,15 @@ func (h *Handler) adminRoutes() *http.ServeMux {
 	mux.HandleFunc("POST /vouchers/{id}/push", h.VoucherPush)
 	mux.HandleFunc("POST /vouchers/{id}/validate", h.VoucherValidate)
 
+	// Piso Wi-Fi coin slot pricing. A separate page rather than a field on
+	// /settings because it is the one piece of the coin flow an operator
+	// changes routinely (a promo price, a new coin denomination), and burying
+	// it in the settings form is how a stale price survives for a year.
+	mux.HandleFunc("GET "+ratesPath, h.Rates)
+	mux.HandleFunc("POST "+ratesPath+"/save", h.RateSave)
+	mux.HandleFunc("POST "+ratesTogglePath, h.RateToggle)
+	mux.HandleFunc("POST "+ratesDeletePath, h.RateDelete)
+
 	// Panel authentication. These are the only routes reachable without a
 	// session (see isPublicPath).
 	mux.HandleFunc("GET /login", h.AdminLogin)

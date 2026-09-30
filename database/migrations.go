@@ -160,6 +160,48 @@ const coinCreditsDDL = `
         updated_at     TEXT NOT NULL
     )`
 
+// ratesDDL backs the admin RATES page: what a coin costs and how much Wi-Fi
+// time it buys.
+//
+// The controller used to price a pulse from a single environment variable
+// (COIN_SECONDS_PER_PULSE), which works until the operator wants more than one
+// denomination or more than one plan - "5 pesos buys 15 minutes but 20 pesos
+// buys an hour" is not expressible as one number. The table makes the pricing
+// explicit, editable from the panel, and durable across a service restart.
+//
+// The time allowance is stored three ways on purpose:
+//
+//   - days / hours / minutes are what the operator picks in the form and what the
+//     panel displays, so the value they typed is the value that is kept;
+//   - granted_seconds is the same figure flattened for arithmetic, so the coin
+//     path never has to re-derive it (and a future second-level granularity does
+//     not need a schema change to be representable).
+//
+// amount_cents is what the operator pays. It is informational - the granted
+// time is what reaches the customer - and exists so the end-of-day
+// reconciliation against the acceptor's coin tube is possible.
+//
+// is_active is a soft delete rather than a hard one: a rate that priced a coin
+// yesterday must still be able to explain a credit issued yesterday, and a
+// hard-deleted row could not.
+const ratesDDL = `
+CREATE TABLE IF NOT EXISTS rates (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    label           TEXT NOT NULL DEFAULT '',
+    pulses          INTEGER NOT NULL DEFAULT 1 CHECK (pulses BETWEEN 1 AND 1000),
+    amount_cents    INTEGER NOT NULL DEFAULT 0 CHECK (amount_cents >= 0),
+    days            INTEGER NOT NULL DEFAULT 0 CHECK (days BETWEEN 0 AND 30),
+    hours           INTEGER NOT NULL DEFAULT 0 CHECK (hours BETWEEN 0 AND 23),
+    minutes         INTEGER NOT NULL DEFAULT 0 CHECK (minutes BETWEEN 0 AND 59),
+    granted_seconds INTEGER NOT NULL DEFAULT 0 CHECK (granted_seconds >= 0),
+    is_active       INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+)`
+
+const ratesIndexesDDL = `
+CREATE INDEX IF NOT EXISTS rates_active_idx ON rates(is_active, pulses)`
+
 const coinCreditsIndexesDDL = `
     CREATE INDEX IF NOT EXISTS coin_credits_status_idx ON coin_credits(status, updated_at DESC);
     CREATE INDEX IF NOT EXISTS coin_credits_node_idx ON coin_credits(node_id)`
@@ -229,6 +271,17 @@ var migrations = []migration{
 			// an install that never wires up hardware is unaffected.
 			coinCreditsDDL,
 			coinCreditsIndexesDDL,
+		},
+	},
+	{
+		version: 7,
+		name:    "coin-rates",
+		statements: []string{
+			// The pricing table behind the admin RATES page. Additive: an
+			// install that never opens the page keeps pricing pulses from
+			// COIN_SECONDS_PER_PULSE exactly as before.
+			ratesDDL,
+			ratesIndexesDDL,
 		},
 	},
 }

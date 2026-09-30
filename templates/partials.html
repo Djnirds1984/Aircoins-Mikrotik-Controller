@@ -169,6 +169,47 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
      labels wrap, so they stack instead of shrinking the numbers. */
   .coin-readout{grid-template-columns:1fr}
 }
+/* The "Insert coin" modal.
+
+   It is a modal rather than a panel in the page flow because the customer is
+   standing at a machine with a coin in their hand: the only thing they need to
+   see is how much time they have bought and one big button. Putting it over the
+   page keeps the voucher field and the kiosk stack out of the way, and gives
+   the balance a size it can be read at arm's length from.
+
+   position:fixed with an overlay rather than <dialog> because the kiosk has to
+   work on the older WebViews still shipped with budget Android phones, where
+   showModal() is missing or behaves inconsistently. The manual open/close here
+   is what <dialog> would have provided, and the script sets aria-expanded and
+   the hidden attribute to match. */
+.coin-modal{
+  position:fixed; inset:0; z-index:60;
+  display:flex; align-items:center; justify-content:center;
+  padding:16px;
+  background:rgba(4,8,18,.72);
+  -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px);
+}
+.coin-modal[hidden]{display:none}
+.coin-modal .coin{
+  width:min(420px,100%); max-height:calc(100dvh - 32px); overflow-y:auto;
+  margin:0; padding:20px 18px;
+  border:1px solid var(--line); border-radius:18px;
+  background:linear-gradient(180deg,var(--panel),var(--panel-2));
+  box-shadow:0 24px 60px rgba(0,0,0,.6);
+  text-align:left;
+}
+.coin-modal h2{display:flex; align-items:center; gap:10px}
+.coin-modal .sub{color:var(--muted); margin:.1em 0 0}
+/* A close affordance in the corner, for a customer who inserted the wrong coin
+   or changed their mind. It is deliberately not the only way out: the modal can
+   also be dismissed with Escape or a tap on the backdrop. */
+.coin-close{
+  margin-left:auto; background:none; border:0; color:var(--muted);
+  font:inherit; font-size:1.5rem; line-height:1; cursor:pointer; padding:2px 6px;
+}
+.coin-close:hover{color:var(--text)}
+.coin-close:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.btn-block{width:100%}
 /* Coin tab styling, kept here rather than in the pages so the tab looks the
    same on the welcome screen and on the sign-in form. The readout mirrors the
    clock cards on the session page: big, tabular figures that do not reflow as
@@ -285,62 +326,82 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
      needs is rendered into data-* attributes by the handler, which means the
      rates on screen are always the server's real configuration rather than
      numbers typed into the markup. */}}
+{{/* The "Insert coin" modal, shared by the captive welcome page and the sign-in
+     page so both offer the same flow.
+
+     It starts hidden and is opened by the INSERT COIN button (coinScript wires
+     the pairing). Everything the script needs is rendered into data-*
+     attributes by the handler, so the balance on screen is always the server's
+     real figure rather than something typed into the markup.
+
+     There is no build step and no external asset anywhere in here: a guest
+     behind a captive portal has no internet at all, so anything fetched from a
+     CDN simply never loads. */}}
 {{define "coinTab"}}
-<section class="coin" id="coin-tab"
-         data-subject="{{.Coin.Subject}}"
-         data-status-url="{{.Coin.StatusURL}}"
-         data-connect-url="{{.Coin.ConnectURL}}"
-         data-seconds="{{.Coin.RemainingSeconds}}"
-         data-enabled="{{.Coin.Enabled}}">
+<div class="coin-modal" id="coin-modal" hidden
+     data-subject="{{.Coin.Subject}}"
+     data-status-url="{{.Coin.StatusURL}}"
+     data-connect-url="{{.Coin.ConnectURL}}"
+     data-seconds="{{.Coin.RemainingSeconds}}"
+     data-enabled="{{.Coin.Enabled}}">
+  <section class="coin" id="coin-tab" role="dialog" aria-modal="true"
+           aria-labelledby="coin-modal-title">
+    <h2 id="coin-modal-title">
+      Insert coin
+      <button class="coin-close" type="button" id="coin-close"
+              aria-label="Close">&times;</button>
+    </h2>
+    <p class="sub">Drop a coin into the slot. This screen updates by itself.</p>
 
-  <h2>Insert coin</h2>
-  <p class="sub">Drop a coin into the slot. This page updates by itself.</p>
-
-  {{if not .Coin.Enabled}}
-    <div class="alert warn">
-      The coin slot is not set up on this network yet. Ask the front desk for a
-      voucher code instead.
-    </div>
-  {{else}}
-    <div class="coin-readout">
-      {{/* The two numbers the customer actually cares about: what they paid and
-           what it bought. Both are rendered server side so they are correct on
-           first paint, then kept live by the poller below. */}}
-      <div class="coin-cell">
-        <div class="label">Time bought</div>
-        <div class="value" id="coin-time" data-seconds="{{.Coin.RemainingSeconds}}">{{.Coin.SessionLabel}}</div>
+    {{if not .Coin.Enabled}}
+      <div class="alert warn">
+        The coin slot is not set up on this network yet. Ask the front desk for a
+        voucher code instead.
       </div>
-      <div class="coin-cell">
-        <div class="label">Inserted</div>
-        {{/* data-cents carries the rendered figure so the poller can seed
-             itself from it. Without it the first apply() paints a 0.00 over
-             the amount the server already knew, and the customer watches their
-             ₱20.00 briefly become ₱0.00. */}}
-        <div class="value" id="coin-amount" data-cents="{{.Coin.AmountCents}}">{{if .Coin.MoneyLabel}}{{.Coin.MoneyLabel}}{{else}}0.00{{end}}</div>
+    {{else}}
+      <div class="coin-readout">
+        {{/* The two numbers the customer actually cares about: what they paid and
+             what it bought. Both are rendered server side so they are correct on
+             first paint, then kept live by the poller. */}}
+        <div class="coin-cell">
+          <div class="label">Time bought</div>
+          <div class="value" id="coin-time" data-seconds="{{.Coin.RemainingSeconds}}">{{.Coin.SessionLabel}}</div>
+        </div>
+        <div class="coin-cell">
+          <div class="label">Inserted</div>
+          {{/* data-cents carries the rendered figure so the poller can seed
+               itself from it. Without it the first apply() paints a 0.00 over
+               the amount the server already knew, and the customer watches their
+               ₱20.00 briefly become ₱0.00. */}}
+          <div class="value" id="coin-amount" data-cents="{{.Coin.AmountCents}}">{{if .Coin.MoneyLabel}}{{.Coin.MoneyLabel}}{{else}}0.00{{end}}</div>
+        </div>
       </div>
-    </div>
 
-    <p class="hint" id="coin-hint" role="status" aria-live="polite">
-      Waiting for the coin slot&hellip;
-    </p>
+      {{/* aria-live so a screen reader announces the balance as each coin
+           lands. A customer using assistive tech gets the same feedback a
+           sighted one gets from the number changing. */}}
+      <p class="hint" id="coin-hint" role="status" aria-live="polite">
+        Waiting for the coin slot&hellip;
+      </p>
 
-    {{/* The action posts to the controller, which turns the balance into a real
-         hotspot session. The hotspot parameters travel with it, so the client is
-         logged in against the right host and sent on to where it was going.
-         coinAction builds that query safely, for the same reason portalAction
-         does. */}}
-    <form method="post" action="{{coinAction .Coin .Portal}}">
-      <button class="btn primary btn-block" type="submit" id="coin-connect">
-        Done &mdash; Connect now
-      </button>
-    </form>
+      {{/* The action posts to the controller, which turns the balance into a
+           real hotspot session. The hotspot parameters travel with it, so the
+           client is logged in against the right host and sent on to where it was
+           going. coinAction builds that query safely, for the same reason
+           portalAction does. */}}
+      <form method="post" action="{{coinAction .Coin .Portal}}">
+        <button class="btn primary btn-block" type="submit" id="coin-connect">
+          Done paying &mdash; Connect
+        </button>
+      </form>
 
-    <p class="hint">
-      Each coin buys about {{.Coin.SecondsPerPulseLabel}}.
-      {{if .Coin.IdleMinutes}}Unused credit is released after {{.Coin.IdleMinutes}} minutes, so insert your coins before you connect.{{end}}
-    </p>
-  {{end}}
-</section>
+      <p class="hint">
+        Each coin buys about {{.Coin.SecondsPerPulseLabel}}.
+        {{if .Coin.IdleMinutes}}Unused credit is released after {{.Coin.IdleMinutes}} minutes, so insert your coins before you connect.{{end}}
+      </p>
+    {{end}}
+  </section>
+</div>
 {{end}}
 
 
@@ -357,6 +418,7 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
     <a href="{{.AdminPath}}/network"{{if eq .Nav "network"}} class="active"{{end}}>Network</a>
     <a href="{{.AdminPath}}/tools"{{if eq .Nav "tools"}} class="active"{{end}}>Tools</a>
     <a href="{{.AdminPath}}/vouchers"{{if eq .Nav "vouchers"}} class="active"{{end}}>Vouchers</a>
+    <a href="{{.AdminPath}}/rates"{{if eq .Nav "rates"}} class="active"{{end}}>Rates</a>
     <a href="{{.AdminPath}}/sessions"{{if eq .Nav "sessions"}} class="active"{{end}}>Sessions</a>
     <a href="{{.AdminPath}}/portal-editor"{{if eq .Nav "portal"}} class="active"{{end}}>Portal</a>
     <a href="{{.AdminPath}}/settings"{{if eq .Nav "settings"}} class="active"{{end}}>Settings</a>
@@ -434,30 +496,36 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
 {{end}}
 
 
-{{/* The coin tab's live updater, shared by every page that shows the tab.
+{{/* The coin modal's live updater, shared by every page that shows it.
 
    Why it polls at all: the balance lives on the controller, and the only thing
    that knows a coin went in is the NodeMCU. Polling /api/coin-status is the
-   simplest way for the browser to learn about it, and two seconds is a good
-   compromise - fast enough that a customer sees the number move while they are
-   still looking at the screen, slow enough that a kiosk left open overnight does
-   not put meaningful load on the board.
+   simplest way for the browser to learn about it.
+
+   One second, not two. The customer is standing at the machine watching this
+   dialog, so a two second delay reads as "nothing happened" and is the single
+   most common complaint about a coin box. The request is a single indexed row
+   read, and the poller only runs while the modal is actually open, so the load
+   is a handful of queries per customer rather than a constant background poll.
 
    Robustness rules this script follows, all of which matter on a walled-garden
    connection that drops without warning:
      * a failed poll never blanks the screen, it just says so quietly;
      * a response for a stale page (the guest navigated back) is ignored;
-     * the interval is cleared when the tab is hidden and restarted when it
-       comes back, so a phone in a pocket is not polling the controller;
+     * polling is suspended when the tab is hidden and when the modal is
+       closed, so a phone in a pocket is not talking to the controller;
+     * the "Done paying" press stops polling before the navigation starts, so a
+       response that arrives mid-flight cannot repaint the page underneath it;
      * every string is written through textContent, never innerHTML, so a value
        from the network can never become markup. */}}
 {{define "coinScript"}}
 <script>
 (function () {
+  var modal = document.getElementById('coin-modal');
   var tab = document.getElementById('coin-tab');
-  if (!tab) { return; }
+  if (!modal || !tab) { return; }
 
-  var POLL_MS = 2000;
+  var POLL_MS = 1000;
   var DAY = 86400, HOUR = 3600, MINUTE = 60;
 
   var subject = tab.getAttribute('data-subject') || '';
@@ -535,7 +603,7 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
     }
 
     if (seconds > 0) {
-      setHint('Credit ready. Press "Done - Connect now" when you are finished inserting coins.');
+      setHint('Credit ready. Press "Done paying - Connect" when you have finished inserting coins.');
       if (button) { button.disabled = false; }
     } else {
       setHint('Insert a coin to start.');
@@ -569,8 +637,13 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
     });
   }
 
+  // The poller runs only while the modal is open. A closed modal is a customer
+  // who has walked away or is using the voucher field, and neither should be
+  // generating a request a second for the rest of the session.
+  function isOpen() { return !modal.hasAttribute('hidden'); }
+
   function start() {
-    if (timer === null) {
+    if (timer === null && isOpen()) {
       poll();
       timer = setInterval(poll, POLL_MS);
     }
@@ -583,12 +656,56 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
     }
   }
 
-  // Poll immediately so the first paint is corrected without waiting a full
-  // interval, and reflect the server-rendered value in the meantime.
-  // Paint the server-rendered state and start, so the counter is already right
-  // on first load rather than after the first round trip.
+  // Paint the server-rendered state first, so the counter is already right on
+  // first open rather than after the first round trip.
   apply({ remaining_seconds: lastSeconds, amount_cents: lastCents });
-  start();
+
+  function open() {
+    modal.removeAttribute('hidden');
+    // Move focus into the dialog so a keyboard or screen-reader user lands
+    // inside it rather than being left on the button that opened it, and so the
+    // first Escape reaches the dialog.
+    var focusTarget = button && !button.disabled ? button : modal.querySelector('.coin-close');
+    if (focusTarget && focusTarget.focus) { focusTarget.focus(); }
+    start();
+  }
+
+  function close() {
+    // A dialog left open behind a returning customer is a trap: the Escape key
+    // and the backdrop both stop working the moment focus moves elsewhere.
+    modal.setAttribute('hidden', '');
+    stop();
+    if (opener && opener.focus) { opener.focus(); }
+  }
+
+  // Any control with aria-controls pointing at the modal is an opener. The
+  // pages differ - the kiosk has a full-width INSERT COIN button in its stack,
+  // the sign-in page has a card button - so the pairing is discovered rather
+  // than hardcoded to one id.
+  var opener = document.querySelector('[aria-controls="coin-modal"]');
+  if (opener) {
+    opener.setAttribute('aria-expanded', 'false');
+    opener.addEventListener('click', function (event) {
+      event.preventDefault();
+      open();
+    });
+  }
+
+  var closeBtn = document.getElementById('coin-close');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', close);
+  }
+
+  // A tap on the overlay - but not on the dialog itself - closes it. The
+  // contains() check is what stops a tap on the balance from dismissing the
+  // screen the customer is reading.
+  modal.addEventListener('click', function (event) {
+    if (!tab.contains(event.target)) { close(); }
+  });
+
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && isOpen()) { close(); }
+  });
 
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) { stop(); } else { start(); }
@@ -600,6 +717,7 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
       // arrives mid-navigation cannot repaint the page underneath the redirect.
       stop();
       button.textContent = 'Connecting...';
+      button.disabled = true;
     });
   }
 })();

@@ -180,11 +180,35 @@ body.kiosk{
   margin-top:0; padding:14px 12px;
   background:var(--k-panel); border:1px solid var(--k-line); border-radius:14px;
 }
-.kiosk .coin h2{display:none}          /* the stack already says INSERT COIN */
+/* The dialog supplies its own chrome, so the kiosk's in-flow panel styling does
+   not apply to it. The heading stays visible here because it is the dialog's
+   title; the teal treatment comes from .kiosk .btn.primary below. */
 .kiosk .coin .sub{margin:0 0 10px; font-size:.76rem}
 .kiosk .coin-readout{margin:0 0 10px}
 .kiosk .coin-cell{background:var(--k-panel-2); padding:10px 8px}
 .kiosk .coin-cell .value{font-size:1.15rem}
+/* The overlay is darker on the kiosk so the balance reads clearly over whatever
+   background photo the operator has uploaded. */
+.kiosk .coin-modal{
+  background:rgba(3,6,10,.86);
+  -webkit-backdrop-filter:blur(5px); backdrop-filter:blur(5px);
+}
+.kiosk .coin-modal .coin{
+  background:linear-gradient(180deg,var(--k-panel),var(--k-panel-2));
+  border-color:var(--k-line);
+}
+.kiosk .coin-modal h2{
+  display:flex; align-items:center; gap:10px;
+  text-transform:uppercase; letter-spacing:.14em; font-size:.95rem; color:var(--k-teal);
+}
+.kiosk .coin-close{color:var(--k-muted)}
+.kiosk .coin-close:hover{color:var(--k-text)}
+.kiosk .coin-modal .btn.primary{
+  background:linear-gradient(135deg,var(--k-teal),var(--k-teal-dim));
+  color:#04211f; border-color:transparent; font-weight:800;
+  border-radius:999px; letter-spacing:.07em; text-transform:uppercase;
+  padding:14px 16px; font-size:.95rem;
+}
 .kiosk .btn.primary{
   background:linear-gradient(135deg,var(--k-teal),var(--k-teal-dim));
   color:#04211f; border-color:transparent; font-weight:800;
@@ -328,10 +352,13 @@ body.kiosk{
         Claim free time <span class="soon">(coming soon)</span>
       </button>
 
-      {{/* The only action in the stack that is wired up. It reveals the coin
-           panel below and lets the poller take over from there. */}}
+      {{/* The only action in the stack that is wired up. It opens the INSERT COIN
+           modal, where the live balance and the Done paying button live. The
+           pairing with the modal is by aria-controls, which coinScript resolves,
+           so this button and the dialog cannot drift apart. */}}
       <button class="kiosk-btn coin" type="button" id="kiosk-coin-btn"
-              aria-controls="coin-tab" aria-expanded="false">Insert coin</button>
+              aria-controls="coin-modal" aria-haspopup="dialog"
+              aria-expanded="false">Insert coin</button>
 
       <button class="kiosk-btn danger" type="button" data-soon>
         Pause <span class="soon">(coming soon)</span>
@@ -348,7 +375,7 @@ body.kiosk{
     <div class="kiosk-rates" id="kiosk-rates" hidden>
       {{if .Coin.Enabled}}
         Each coin buys about <b>{{.Coin.SecondsPerPulseLabel}}</b> of Wi-Fi time.
-        Insert coins, then press <b>Done &mdash; Connect now</b>.
+        Insert coins, then press <b>Done paying &mdash; Connect</b>.
       {{else}}
         The coin slot is not set up on this network yet. Please ask the front
         desk for a voucher code.
@@ -366,9 +393,8 @@ body.kiosk{
 
 
 
-    {{/* The Piso Wi-Fi coin slot, shared verbatim with the sign-in page. The
-         kiosk hides its own heading because the button stack already says
-         INSERT COIN. */}}
+    {{/* The Piso Wi-Fi coin slot modal, shared verbatim with the sign-in page. The
+         INSERT COIN button in the stack above is its opener. */}}
     {{template "coinTab" .}}
     {{end}}{{/* end of the not-Online branch */}}
 
@@ -439,18 +465,6 @@ body.kiosk{
     var hidden = target.hasAttribute('hidden');
     if (hidden) { target.removeAttribute('hidden'); } else { target.setAttribute('hidden', ''); }
     button.setAttribute('aria-expanded', hidden ? 'true' : 'false');
-  }
-
-  var coinBtn = document.getElementById('kiosk-coin-btn');
-  var coinTab = document.getElementById('coin-tab');
-  if (coinBtn && coinTab) {
-    // The coin panel is the page's main event, so it starts open rather than
-    // hiding the balance behind a tap.
-    coinTab.removeAttribute('hidden');
-    coinBtn.setAttribute('aria-expanded', 'true');
-    coinBtn.addEventListener('click', function () {
-      coinTab.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
   }
 
   var ratesBtn = document.getElementById('kiosk-rates-btn');

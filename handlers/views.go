@@ -37,6 +37,10 @@ func TemplateFuncs() template.FuncMap {
 		"upper":   strings.ToUpper,
 		"lower":   strings.ToLower,
 		"default": defaultValue,
+		// printf is used by the rates form to compare a dropdown option against
+		// a submitted string value. The template language cannot compare an int
+		// with a string, so the option is rendered to text on both sides.
+		"printf": fmt.Sprintf,
 	}
 }
 

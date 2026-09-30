@@ -149,19 +149,36 @@ func (h *Handler) CoinPulse(w http.ResponseWriter, r *http.Request) {
 
 	pulses := body.Pulses
 	seconds := body.Seconds
-	if seconds <= 0 {
-		seconds = pulses * h.cfg.CoinPulseSeconds
+	amount := body.AmountCents
+
+	// The rates table is the configured pricing; the environment defaults are
+	// the fallback for an install that has never opened the RATES page. A node
+	// that sends its own seconds or cents is still honoured, because a hardware
+	// acceptor that knows its own denominations is authoritative about them.
+	if seconds <= 0 || amount <= 0 {
+		allocation, err := h.pricePulses(ctx, pulses)
+		if err != nil {
+			h.log.Warn("coin pulse cannot be priced", "remote", clientIP(r), "error", err)
+			h.writeCoinError(w, http.StatusServiceUnavailable, "no_rates",
+				"the coin slot has no active rate configured. An operator must add one on the Rates page.")
+			return
+		}
+		if seconds <= 0 {
+			seconds = allocation.Seconds
+		}
+		if amount <= 0 {
+			amount = allocation.Cents
+		}
+		if len(allocation.TierIDs) > 0 {
+			h.log.Info("coin pulse priced", "tiers", allocation.TierIDs,
+				"label", allocation.Label, "pulses", pulses)
+		}
 	}
 	// A report claiming a year of access in one POST is a fault, not a sale.
 	// The cap still allows a full day of coins in one burst, which covers any
 	// real acceptor.
 	if seconds > database.MaxCoinGrantedSecondsPerReport {
 		seconds = database.MaxCoinGrantedSecondsPerReport
-	}
-
-	amount := body.AmountCents
-	if amount <= 0 {
-		amount = int64(pulses) * int64(h.cfg.CoinPulseCents)
 	}
 
 	pulse := database.CoinPulse{
@@ -187,7 +204,7 @@ func (h *Handler) CoinPulse(w http.ResponseWriter, r *http.Request) {
 		// sketch retry a coin that is already paid for.
 		h.log.Info("coin pulse already recorded", "node", body.NodeID,
 			"subject", subject, "event", body.EventID)
-		writeCoinJSON(w, http.StatusOK, h.coinBalanceOf(credit, 0, true))
+		writeCoinJSON(w, http.StatusOK, h.coinBalanceOf(ctx, credit, 0, true))
 		return
 	case errors.Is(err, database.ErrCoinPulseInvalid):
 		h.writeCoinError(w, http.StatusBadRequest, "invalid_pulse", err.Error())
@@ -199,7 +216,7 @@ func (h *Handler) CoinPulse(w http.ResponseWriter, r *http.Request) {
 
 	h.log.Info("coin pulse recorded", "node", body.NodeID, "subject", subject,
 		"pulses", pulses, "seconds", seconds, "remaining", credit.RemainingSeconds())
-	writeCoinJSON(w, http.StatusOK, h.coinBalanceOf(credit, pulses, false))
+	writeCoinJSON(w, http.StatusOK, h.coinBalanceOf(ctx, credit, pulses, false))
 }
 
 // CoinStatus reports a client's current coin balance and the access time it
@@ -232,7 +249,7 @@ func (h *Handler) CoinStatus(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, database.ErrNotFound):
 		// Never having inserted anything is a normal state, not an error: the
 		// tab must render "0 minutes", not an error box.
-		writeCoinJSON(w, http.StatusOK, h.coinBalanceOf(database.CoinCredit{
+		writeCoinJSON(w, http.StatusOK, h.coinBalanceOf(ctx, database.CoinCredit{
 			Subject: subject,
 			Status:  database.CoinActive,
 		}, 0, false))
@@ -242,13 +259,62 @@ func (h *Handler) CoinStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeCoinJSON(w, http.StatusOK, h.coinBalanceOf(credit, 0, false))
+	writeCoinJSON(w, http.StatusOK, h.coinBalanceOf(ctx, credit, 0, false))
+}
+
+// pricePulses converts a pulse count into access time and face value.
+//
+// The rates table is authoritative when it has active tiers. When it has none -
+// a fresh install, or an operator who disabled everything - the single
+// COIN_SECONDS_PER_PULSE / COIN_CENTS_PER_PULSE environment pair is used
+// instead, so upgrading the controller does not change the price of a coin on a
+// machine that was working fine yesterday. That fallback is the reason the
+// environment variables still exist.
+func (h *Handler) pricePulses(ctx context.Context, pulses int) (database.RateAllocation, error) {
+	allocation, err := h.db.Rates().Price(ctx, pulses)
+	switch {
+	case err == nil && allocation.Seconds > 0:
+		return allocation, nil
+	case err != nil && !errors.Is(err, database.ErrNoActiveRates):
+		// A database problem is not the same as "no rate configured", and must
+		// not be papered over with the environment default: that would quietly
+		// sell coins at the wrong price during an outage.
+		return database.RateAllocation{}, err
+	}
+
+	if pulses <= 0 {
+		return database.RateAllocation{}, nil
+	}
+	fallback := database.RateAllocation{
+		Seconds:        pulses * h.cfg.CoinPulseSeconds,
+		Cents:          int64(pulses) * int64(h.cfg.CoinPulseCents),
+		PulsesConsumed: pulses,
+		Label:          "environment fallback",
+	}
+	if fallback.Seconds <= 0 {
+		return database.RateAllocation{}, database.ErrNoActiveRates
+	}
+	return fallback, nil
+}
+
+// coinSecondsPerPulse is what one pulse is currently worth.
+//
+// The page's "each coin buys about X" line is computed here on the server
+// rather than being written into the markup, so it always states the price that
+// is actually live - a tier configured in the panel minutes ago, or the
+// environment fallback if there is no tier.
+func (h *Handler) coinSecondsPerPulse(ctx context.Context) int {
+	return h.db.Rates().FallbackSecondsPerPulse(ctx, h.cfg.CoinPulseSeconds)
 }
 
 // coinBalanceOf renders a stored credit as the wire shape. A zero credit (the
 // "never inserted anything" case) still produces a well formed, zeroed answer
 // so the browser has no special case to write.
-func (h *Handler) coinBalanceOf(credit database.CoinCredit, accepted int, duplicate bool) coinBalance {
+//
+// ctx is taken explicitly rather than read off the credit: the row is a plain
+// value with no request attached, and the seconds-per-pulse figure it echoes is
+// read from the rates table at render time.
+func (h *Handler) coinBalanceOf(ctx context.Context, credit database.CoinCredit, accepted int, duplicate bool) coinBalance {
 	remaining := credit.RemainingSeconds()
 	return coinBalance{
 		Subject:          credit.Subject,
@@ -258,7 +324,7 @@ func (h *Handler) coinBalanceOf(credit database.CoinCredit, accepted int, duplic
 		RemainingSeconds: remaining,
 		SessionLabel:     database.FormatCoinSeconds(remaining),
 		Status:           credit.Status,
-		SecondsPerPulse:  h.cfg.CoinPulseSeconds,
+		SecondsPerPulse:  h.coinSecondsPerPulse(ctx),
 		Duplicate:        duplicate,
 		AcceptedPulses:   accepted,
 		UpdatedAt:        credit.UpdatedAt.Format(time.RFC3339),

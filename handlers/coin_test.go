@@ -315,8 +315,8 @@ func TestCoinConnectKeepsTheBalanceWhenTheRouterIsDown(t *testing.T) {
 	}
 }
 
-// TestCoinTabRendersOnThePortal proves the tab is actually on the page, carries
-// the poller's configuration, and offers the action button.
+// TestCoinTabRendersOnThePortal proves the modal is actually on the page,
+// carries the poller's configuration, and offers the action button.
 func TestCoinTabRendersOnThePortal(t *testing.T) {
 	base, _ := newCaptiveE2E(t, coinTestConfig())
 
@@ -328,11 +328,21 @@ func TestCoinTabRendersOnThePortal(t *testing.T) {
 	body := readAll(t, resp)
 
 	for _, want := range []string{
+		// The dialog wrapper carries the poller's data- attributes and must
+		// start hidden: a customer who lands on the portal without touching
+		// INSERT COIN should see the sign-in page, not a modal over it.
+		`id="coin-modal"`,
 		`id="coin-tab"`,
+		`role="dialog"`,
+		`aria-modal="true"`,
 		`data-subject="mac:aabbccddeeff"`,
 		`data-status-url="` + coinStatusPath + `"`,
 		"Insert coin",
-		"Done &mdash; Connect now",
+		// The opener and the dialog are paired by aria-controls, and coinScript
+		// resolves that pairing. If the button points at a stale id the modal
+		// never opens and the whole coin flow is dead on arrival.
+		`aria-controls="coin-modal"`,
+		"Done paying &mdash; Connect",
 		// The action must keep the hotspot parameters, or the session would be
 		// created against the wrong host.
 		coinConnectPath + "?",
@@ -346,6 +356,12 @@ func TestCoinTabRendersOnThePortal(t *testing.T) {
 	// would sit on its server-rendered value forever.
 	if !strings.Contains(body, "'?subject='") {
 		t.Error("portal page is missing the poller script")
+	}
+	// One second is the interval the modal is specified to poll at. A slower
+	// value is the complaint that started all this: a customer watching the
+	// dialog sees nothing happen and assumes the acceptor ate their coin.
+	if !strings.Contains(body, "POLL_MS = 1000") {
+		t.Error("the coin modal is not polling every second")
 	}
 }
 
