@@ -17,13 +17,9 @@
       <h1>Settings</h1>
       <p class="sub">Panel access and account security.</p>
     </div>
-    <div class="actions">
-      <form method="post" action="{{.AdminPath}}/logout">
-        {{template "csrf" .}}
-        <button class="btn danger" type="submit">Sign out</button>
-      </form>
-    </div>
   </div>
+  {{/* The Sign out button lives in the shared navigation on every panel page;
+       it is not repeated here, so there is only ever one to reach for. */}}
 
   {{with .Errors.form}}<div class="alert err">{{.}}</div>{{end}}
 

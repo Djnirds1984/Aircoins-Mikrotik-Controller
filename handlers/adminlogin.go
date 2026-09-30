@@ -76,7 +76,25 @@ func (h *Handler) AdminLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
-// AdminLogout revokes the session and returns to the login form.
+// captiveHomePath is where an operator lands after signing out.
+//
+// It is the guest-facing captive portal, not the panel login form: the panel
+// and the portal are the same process on the same address, so "log out" should
+// leave the operator in the same place a customer who just joined the Wi-Fi
+// would be. Dropping them on the login page instead is a dead end, because the
+// thing they most likely want next is to look at the portal again.
+//
+// DashboardAtRoot is the exception: there "/" is the fleet dashboard, which
+// needs a session, so it would bounce straight back to the login form and
+// recreate the dead end this avoids. That config moves the portal to /portal.
+func (h *Handler) captiveHomePath() string {
+	if h.cfg.DashboardAtRoot {
+		return "/portal"
+	}
+	return "/"
+}
+
+// AdminLogout revokes the session and returns to the captive portal.
 func (h *Handler) AdminLogout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(adminSessionCookie); err == nil {
 		if err := h.db.AdminUsers().DeleteSession(r.Context(), cookie.Value); err != nil {
@@ -86,8 +104,9 @@ func (h *Handler) AdminLogout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.clearAdminCookie(w)
-	h.log.Info("admin signed out", "remote", clientIP(r))
-	http.Redirect(w, r, h.cfg.AdminPath+"/login", http.StatusSeeOther)
+	target := h.captiveHomePath()
+	h.log.Info("admin signed out", "remote", clientIP(r), "redirect", target)
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 // setAdminCookie stores the session token.

@@ -35,6 +35,7 @@ code,kbd,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#04121f; font-weight:800;
 }
 .nav{display:flex; gap:6px; flex-wrap:wrap; margin-left:auto}
+.nav-signout{display:flex; margin-left:10px; padding-left:12px; border-left:1px solid var(--line)}
 .nav a{padding:7px 13px; border-radius:999px; color:var(--muted); border:1px solid transparent; font-weight:550}
 .nav a:hover{color:var(--text); background:var(--panel-2); text-decoration:none}
 .nav a.active{color:#04121f; background:linear-gradient(135deg,var(--accent),var(--accent-2))}
@@ -160,6 +161,9 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
 @media (max-width:620px){
   .wrap{padding:18px 14px 40px}
   .nav{margin-left:0}
+  /* The sign-out form follows the nav onto its own line rather than being
+     squeezed against the brand on a phone-width screen. */
+  .nav-signout{margin-left:0; padding-left:0; border-left:0}
   h1{font-size:1.25rem}
 }
 </style>{{end}}
@@ -264,6 +268,14 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
     <a href="{{.AdminPath}}/portal-editor"{{if eq .Nav "portal"}} class="active"{{end}}>Portal</a>
     <a href="{{.AdminPath}}/settings"{{if eq .Nav "settings"}} class="active"{{end}}>Settings</a>
   </nav>
+  {{/* Signing out lands on the guest-facing captive portal, so the button says
+       where it goes: an operator on a shared machine should not be surprised by
+       landing on a page meant for customers. The form is a POST so it carries
+       the CSRF token, and the label matches the button on Settings. */}}
+  <form class="nav-signout" method="post" action="{{.AdminPath}}/logout">
+    {{template "csrf" .}}
+    <button class="btn small danger" type="submit" title="Sign out and return to the captive portal">Sign out</button>
+  </form>
 </header>
 {{end}}
 

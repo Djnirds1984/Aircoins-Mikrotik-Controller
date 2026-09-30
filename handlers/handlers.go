@@ -163,6 +163,26 @@ var captiveProbePaths = []string{
 	"/redirect",
 }
 
+// portalEntryPaths are the URLs an operator is likely to point a MikroTik
+// hotspot's redirect at, beyond the root itself.
+//
+// "/login" is the important one and the reason this list exists. MikroTik's own
+// hotspot templates and most setup guides redirect clients to
+// http://<login-host>/login, and on this controller "/login" was the PANEL's
+// sign-in route - so a guest who joined the SSID was shown the operator login
+// form and had nowhere to type a voucher. "/login.html" and "/index.html" are
+// the same collision for an operator who followed the hotspot's own file names.
+//
+// These are registered on the outer mux and therefore public. That is
+// deliberate and safe: the panel's own login lives under the admin prefix
+// (/admin/login), which is where every form and every redirect points, so
+// nothing here shadows it.
+var portalEntryPaths = []string{
+	"/login",
+	"/login.html",
+	"/index.html",
+}
+
 // Routes wires every endpoint and wraps them in the middleware chain.
 //
 // Two front doors are exposed on purpose:
@@ -201,6 +221,14 @@ func (h *Handler) Routes() http.Handler {
 	// prefix is a deployment detail no phone knows about.
 	for _, probe := range captiveProbePaths {
 		mux.HandleFunc("GET "+probe, h.PortalProbe)
+	}
+
+	// The URLs a hotspot redirect is most likely to point at. PortalIndex
+	// forwards to the sign-in form when the hotspot appended its parameters,
+	// and shows the welcome page with a voucher box when it did not, so this
+	// covers both a redirected guest and an operator testing the address.
+	for _, entry := range portalEntryPaths {
+		mux.HandleFunc("GET "+entry, h.PortalIndex)
 	}
 
 	// The panel under its prefix, behind the session guard. "/admin" (no

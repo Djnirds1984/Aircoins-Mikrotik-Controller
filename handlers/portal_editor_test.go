@@ -84,7 +84,87 @@ func TestCaptiveProbePathsShowThePortal(t *testing.T) {
 	}
 }
 
-// TestPanelPathsStillGuarded is the other half of the contract above: widening
+// TestHotspotRedirectPathsShowTheVoucherForm is the regression test for the
+// report "the default landing page is the admin login, it cannot redirect where
+// to put the voucher".
+//
+// The cause: a MikroTik hotspot redirect is usually configured as
+// http://<login-host>/login, and "/login" was the PANEL's sign-in route. A
+// guest who joined the SSID was therefore shown the operator login form. The
+// earlier coverage only asserted "/", so it passed while this was broken.
+//
+// Each path is checked twice: as a hotspot redirect (with parameters, which must
+// reach the voucher form) and as a bare visit (which must still show a voucher
+// box rather than the panel).
+func TestHotspotRedirectPathsShowTheVoucherForm(t *testing.T) {
+	base, _ := newCaptiveE2E(t, Config{})
+
+	paths := []string{"/", "/login", "/login.html", "/index.html"}
+
+	for _, path := range paths {
+		t.Run("redirect"+path, func(t *testing.T) {
+			// Exactly what the hotspot appends to the redirect target.
+			url := base + path + "?mac=AA-BB-CC-DD-EE-FF&ip=10.5.50.42" +
+				"&link-login=http://10.0.0.1/login&link-orig=http://example.com/"
+			body := getBody(t, &http.Client{}, url)
+
+			if strings.Contains(body, "Operator name") {
+				t.Fatalf("%s served the panel login form to a guest", path)
+			}
+			// The voucher field is the whole point: without it a customer has
+			// nowhere to type the code they paid for.
+			if !strings.Contains(body, `name="voucher"`) {
+				t.Errorf("%s has no voucher field for a redirected guest", path)
+			}
+			if !strings.Contains(body, "AA:BB:CC:DD:EE:FF") {
+				t.Errorf("%s did not carry the hotspot parameters into the form", path)
+			}
+		})
+
+		t.Run("bare"+path, func(t *testing.T) {
+			resp, err := noRedirect().Get(base + path)
+			if err != nil {
+				t.Fatalf("GET %s: %v", path, err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("GET %s status = %d, want 200 (not a redirect to the panel)",
+					path, resp.StatusCode)
+			}
+			raw, _ := io.ReadAll(resp.Body)
+			body := string(raw)
+			if strings.Contains(body, "Operator name") {
+				t.Fatalf("%s served the panel login form", path)
+			}
+			if !strings.Contains(body, "voucher") {
+				t.Errorf("%s has no voucher box", path)
+			}
+		})
+	}
+}
+
+// TestPanelLoginStillWorks is the other half: repurposing "/login" must not
+// break the operator's own sign-in, which lives at the admin prefix.
+func TestPanelLoginStillWorks(t *testing.T) {
+	base, _ := newCaptiveE2E(t, Config{})
+
+	// The panel form renders at /admin/login and is the panel's, not the portal.
+	login := getBody(t, &http.Client{}, base+"/admin/login")
+	if !strings.Contains(login, "Operator name") {
+		t.Error("/admin/login no longer renders the panel sign-in form")
+	}
+	if !strings.Contains(login, `action="/admin/login"`) {
+		t.Error("the panel sign-in form does not post to /admin/login")
+	}
+
+	// And signing in through it still reaches the panel.
+	browser := signedInBrowser(t, base)
+	dashboard := getBody(t, browser, base+"/admin/")
+	if !strings.Contains(dashboard, "Sign out") {
+		t.Error("signing in at /admin/login did not reach the panel")
+	}
+}
+
 // what a guest can reach must not expose the fleet. The panel routes keep their
 // redirect to the login form.
 func TestPanelPathsStillGuarded(t *testing.T) {

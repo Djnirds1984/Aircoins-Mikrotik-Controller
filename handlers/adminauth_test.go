@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -311,9 +312,9 @@ func TestLogoutRevokesTheSession(t *testing.T) {
 	base, _ := newUnauthE2E(t, Config{})
 	browser := signedInBrowser(t, base)
 
-	// The sign-out button lives on the settings page, which is also the only
-	// page that carries a CSRF token, so that is where the form is driven from.
-	page := getBody(t, browser, base+"/admin/settings")
+	// The sign-out button is in the shared navigation, which every panel page
+	// renders, so the dashboard is where the form is driven from.
+	page := getBody(t, browser, base+"/admin/")
 	resp, err := browser.PostForm(base+"/admin/logout", url.Values{
 		"csrf_token": {csrfOf(t, page)},
 	})
@@ -332,6 +333,113 @@ func TestLogoutRevokesTheSession(t *testing.T) {
 	if got.StatusCode != http.StatusSeeOther {
 		t.Errorf("after logout the panel answered %d, want a redirect to the login form", got.StatusCode)
 	}
+}
+
+// TestSignOutLandsOnTheCaptivePortal pins where "Sign out" actually goes.
+//
+// It used to redirect to the panel login form, which is a dead end: the panel
+// and the captive portal are the same process on the same address, so an
+// operator on a shared machine who signed out wanted to see the page a customer
+// sees, not another login prompt. The session must still be dead either way -
+// a redirect that leaves the cookie alive would be a much worse bug than the one
+// this replaces.
+func TestSignOutLandsOnTheCaptivePortal(t *testing.T) {
+	base, _ := newUnauthE2E(t, Config{})
+	browser := signedInBrowser(t, base)
+
+	page := getBody(t, browser, base+"/admin/")
+	resp, err := noRedirectClient(browser).PostForm(base+"/admin/logout", url.Values{
+		"csrf_token": {csrfOf(t, page)},
+	})
+	if err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("logout answered %d, want a redirect", resp.StatusCode)
+	}
+	if got, want := resp.Header.Get("Location"), "/"; got != want {
+		t.Errorf("signed out to %q, want the captive portal at %q", got, want)
+	}
+
+	// And the destination has to be a page a guest can actually load: not the
+	// panel (which would bounce back to the login form, the dead end this
+	// change is meant to remove) and not an error.
+	after := noRedirect()
+	after.Jar = browser.Jar
+	home, err := after.Get(base + "/")
+	if err != nil {
+		t.Fatalf("GET / after logout: %v", err)
+	}
+	defer home.Body.Close()
+	if home.StatusCode != http.StatusOK {
+		t.Fatalf("the captive portal answered %d after logout, want 200", home.StatusCode)
+	}
+	raw, _ := io.ReadAll(home.Body)
+	body := string(raw)
+	if strings.Contains(body, `name="csrf_token"`) && strings.Contains(body, "Operator name") {
+		t.Error("the portal root served the panel login form")
+	}
+	if !strings.Contains(body, "Connect to the internet") && !strings.Contains(body, "Free Wi-Fi") {
+		t.Error("the portal root did not serve the captive portal after logout")
+	}
+}
+
+// TestSignOutIsAvailableOnEveryPanelPage proves the button is in the shared
+// navigation rather than tucked onto one screen. An operator should be able to
+// sign out from wherever they happen to be.
+func TestSignOutIsAvailableOnEveryPanelPage(t *testing.T) {
+	base, db := newCaptiveE2E(t, Config{})
+	client := authedClientFor(t, base, db)
+
+	for _, path := range []string{
+		"/admin/", "/admin/routers", "/admin/vouchers",
+		"/admin/sessions", "/admin/portal-editor", "/admin/settings",
+	} {
+		t.Run(path, func(t *testing.T) {
+			body := getBody(t, client, base+path)
+			if !strings.Contains(body, "Sign out") {
+				t.Errorf("%s has no Sign out button", path)
+			}
+			// It must be a POST carrying the CSRF token, not a plain link: a
+			// GET logout can be triggered by any page the operator visits.
+			if !strings.Contains(body, `action="`+`/admin/logout"`) {
+				t.Errorf("%s Sign out does not post to /admin/logout", path)
+			}
+			if !strings.Contains(body, `name="csrf_token"`) {
+				t.Errorf("%s Sign out carries no CSRF token", path)
+			}
+		})
+	}
+}
+
+// TestSignOutNeedsTheCSRFToken proves the button cannot be triggered by a
+// hostile page the operator happens to be visiting.
+func TestSignOutNeedsTheCSRFToken(t *testing.T) {
+	base, db := newCaptiveE2E(t, Config{})
+	client := authedClientFor(t, base, db)
+
+	post, err := client.PostForm(base+"/admin/logout", url.Values{
+		"csrf_token": {"not-the-right-token"},
+	})
+	if err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+	defer post.Body.Close()
+	if post.StatusCode != http.StatusForbidden {
+		t.Errorf("logout with a bad CSRF token answered %d, want 403", post.StatusCode)
+	}
+}
+
+// noRedirectClient returns a copy of the client that does not follow redirects,
+// so a test can read the Location header of a 303.
+func noRedirectClient(c *http.Client) *http.Client {
+	clone := *c
+	clone.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return &clone
 }
 
 // TestSanitizeNextBlocksOpenRedirects covers the phishing shape: an attacker
