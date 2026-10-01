@@ -439,13 +439,22 @@ body.kiosk{
       </div>
     {{else}}
     <div class="kiosk-actions">
-      {{/* A free-time giveaway is not something the controller implements, so
-           this button is marked data-soon: the script says so rather than
-           letting it fail silently. Drop the attribute once a promo flow
-           exists. */}}
-      <button class="kiosk-btn grey" type="button" data-soon>
-        {{icon "gift"}} Claim free time <span class="soon">(coming soon)</span>
-      </button>
+      {{/* Free time is a real giveaway only when the hotspot server profile this
+           guest came through lists "trial" in its login-by set. When it does,
+           the button posts to the device's own login URL, which is what starts
+           a trial session. Otherwise the button is not dimmed or disabled - it
+           is not rendered at all, because a dead control on a public kiosk is a
+           support call. The extra link-URL guard keeps the kiosk landing (which
+           carries no hotspot parameters) from ever showing an actionless form. */}}
+      {{if .TrialEnabled}}
+        {{$trial := .Portal.LinkLoginOnly}}{{if not $trial}}{{$trial = .Portal.LinkLogin}}{{end}}
+        {{if $trial}}
+        <form method="post" action="{{$trial}}" style="margin:0">
+          {{if .Portal.LinkOrig}}<input type="hidden" name="dst" value="{{.Portal.LinkOrig}}">{{end}}
+          <button class="kiosk-btn grey" type="submit">{{icon "gift"}} Claim free time</button>
+        </form>
+        {{end}}
+      {{end}}
 
       {{/* The only action in the stack that is wired up. It opens the INSERT COIN
            modal, where the live balance and the Done paying button live. The

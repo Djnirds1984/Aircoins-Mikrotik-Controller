@@ -603,6 +603,51 @@ func (c *MikrotikClient) RemoveHotspotServerProfile(ctx context.Context, id stri
 	return c.removeROSObject(ctx, hotspotServerProfileMenu, id)
 }
 
+// TrialEnabledOnServer reports whether the hotspot server a guest lands on uses
+// a profile whose login-by set includes "trial". A trial profile is what lets a
+// customer claim free time, so the captive portal offers the button only when
+// this is true.
+//
+// The server is the one named by serverName; when that is empty the first
+// server the device reports is used, which is the common single-hotspot case.
+// A missing server, a missing profile or a profile without a name is reported as
+// "no trial" rather than an error, because none of them is something a guest can
+// act on. Any real device failure is returned so the caller can decide to fail
+// silent instead of turning a welcome page into an error page.
+func (c *MikrotikClient) TrialEnabledOnServer(ctx context.Context, serverName string) (bool, error) {
+	serverArgs := make([]string, 0, 1)
+	if name := strings.TrimSpace(serverName); name != "" {
+		serverArgs = append(serverArgs, "?name="+name)
+	}
+	serverReply, err := c.Run(ctx, hotspotServerMenu+"/print", serverArgs...)
+	if err != nil {
+		return false, err
+	}
+	serverRow := serverReply.First()
+	if serverRow == nil {
+		return false, nil
+	}
+	profileName := strings.TrimSpace(hotspotServerFromRow(serverRow).Profile)
+	if profileName == "" {
+		return false, nil
+	}
+
+	profileReply, err := c.Run(ctx, hotspotServerProfileMenu+"/print", "?name="+profileName)
+	if err != nil {
+		return false, err
+	}
+	profileRow := profileReply.First()
+	if profileRow == nil {
+		return false, nil
+	}
+	for _, method := range hotspotServerProfileFromRow(profileRow).LoginMethods() {
+		if strings.EqualFold(method, "trial") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // ---------------------------------------------------------------------------
 // /ip/hotspot/user/profile : the hotspot user profiles
 // ---------------------------------------------------------------------------

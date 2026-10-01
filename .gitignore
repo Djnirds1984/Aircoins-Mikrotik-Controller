@@ -24,3 +24,6 @@ secret.key
 *.swp
 .DS_Store
 Thumbs.db
+
+# Qoder IDE metadata cache
+.qoder/

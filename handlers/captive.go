@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/djnirds1984/aircoins-mikrotik-controller/database"
 )
@@ -66,7 +67,17 @@ type captivePage struct {
 	ShowPassword bool
 	// FallbackLink is the hotspot's own login URL when RedirectTo is empty.
 	FallbackLink string
+	// TrialEnabled reports that the hotspot server profile this guest landed
+	// through allows trial (free time) logins. When it is false the captive
+	// page hides the "Claim free time" button entirely, so a kiosk never offers
+	// a giveaway the device would refuse.
+	TrialEnabled bool
 }
+
+// portalTrialTimeout bounds the router round trip that reads the trial setting.
+// It is deliberately short: the check only decorates the page, so a slow or
+// unreachable device must not stall a guest's welcome screen.
+const portalTrialTimeout = 3 * time.Second
 
 // coinPortal is everything the guest's coin tab needs.
 //
@@ -140,11 +151,13 @@ func (h *Handler) PortalIndex(w http.ResponseWriter, r *http.Request) {
 		Coin:      h.coinPortalFor(r, request),
 	}
 
-	// The router is only used to brand the page; an unresolvable one must not
-	// turn a guest's welcome page into an error page.
+	// The router is only used to brand the page and to decide whether the
+	// hotspot offers free trial time; an unresolvable one must not turn a
+	// guest's welcome page into an error page.
 	if router, err := h.resolvePortalRouter(ctx, request); err == nil {
 		view.RouterName = router.Name
 		view.RouterKnown = true
+		view.TrialEnabled = h.portalTrialEnabled(ctx, request, router)
 	} else {
 		h.log.Warn("portal welcome page has no router", "remote", clientIP(r), "error", err)
 	}
@@ -200,8 +213,37 @@ func (h *Handler) PortalProbe(w http.ResponseWriter, r *http.Request) {
 	if router, err := h.resolvePortalRouter(r.Context(), portalRequest{}); err == nil {
 		view.RouterName = router.Name
 		view.RouterKnown = true
+		view.TrialEnabled = h.portalTrialEnabled(r.Context(), portalRequest{}, router)
 	}
 	h.render(w, r, http.StatusOK, "captive.html", view)
+}
+
+// portalTrialEnabled reports whether the hotspot server a portal request belongs
+// to uses a profile that allows trial (free time) logins.
+//
+// It dials the device on a short leash and fails silent: an unreachable router
+// leaves the answer false, so the welcome page simply does not offer the
+// free-time button rather than turning into an error page. This preserves the
+// guest-facing invariant that a device problem is never the guest's problem.
+func (h *Handler) portalTrialEnabled(ctx context.Context, request portalRequest, router database.Router) bool {
+	dialCtx, cancel := context.WithTimeout(ctx, portalTrialTimeout)
+	defer cancel()
+
+	client, err := h.dialRouter(dialCtx, router)
+	if err != nil {
+		return false
+	}
+	defer client.Close()
+
+	trialCtx, cancelTrial := context.WithTimeout(dialCtx, portalTrialTimeout)
+	defer cancelTrial()
+	enabled, err := client.TrialEnabledOnServer(trialCtx, request.ServerName)
+	if err != nil {
+		h.log.Debug("portal could not read the hotspot trial setting",
+			"router", router.Name, "error", err)
+		return false
+	}
+	return enabled
 }
 
 // captivePageFromPortal converts a portalPage (used by the full-page renderer
@@ -221,6 +263,7 @@ func captivePageFromPortal(p *portalPage) *captivePage {
 		RedirectTo:   p.RedirectTo,
 		ShowPassword: p.ShowPassword,
 		FallbackLink: p.FallbackLink,
+		TrialEnabled: p.TrialEnabled,
 		LoginURL:     portalLoginPath,
 	}
 	if p.Success {

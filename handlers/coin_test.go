@@ -589,9 +589,10 @@ func TestKioskLayoutRendersThePisoSkin(t *testing.T) {
 		t.Error("the status title does not report its unauthenticated state")
 	}
 
-	// The five stacked controls, in the order the reference shows them.
+	// The stacked controls, in the order the reference shows them. "Claim free
+	// time" is not listed: it renders only when the hotspot profile allows trial
+	// logins, and this fixture has no router, so the button is (correctly) gone.
 	stack := []string{
-		"Claim free time",
 		"Insert coin",
 		"Pause",
 		"Redeem",
@@ -620,9 +621,10 @@ func TestKioskLayoutRendersThePisoSkin(t *testing.T) {
 	// Controls the controller does not implement must say so rather than look
 	// live; a dead button on a public kiosk is a support call. Counted on the
 	// button element, not the bare attribute, or the stylesheet's
-	// [data-soon] selectors would be counted too.
-	if n := strings.Count(body, `type="button" data-soon`); n != 2 {
-		t.Errorf("%d controls are marked data-soon, want 2 (claim free time, pause)", n)
+	// [data-soon] selectors would be counted too. Only PAUSE is left: the
+	// free-time button is now a real, conditionally rendered control.
+	if n := strings.Count(body, `type="button" data-soon`); n != 1 {
+		t.Errorf("%d controls are marked data-soon, want 1 (pause)", n)
 	}
 
 	// The metadata line and the timer, filled server side.
@@ -685,5 +687,44 @@ func TestKioskClockCountsDownTheCoinCredit(t *testing.T) {
 	// metadata line shows.
 	if !strings.Contains(body, "<b>20</b>") {
 		t.Error("POINTS does not show the 20 credited minutes")
+	}
+}
+
+// TestKioskClaimFreeTimeIsConditionalOnTrial pins the free-time button to the
+// hotspot server profile: it renders (as a real form posting to the device's own
+// login URL) only when trial login is available, and disappears completely when
+// it is not, so a kiosk never shows a giveaway the router would refuse.
+func TestKioskClaimFreeTimeIsConditionalOnTrial(t *testing.T) {
+	view := func(trial bool) *captivePage {
+		return &captivePage{
+			page: samplePage("Wi-Fi sign in", ""),
+			Portal: portalRequest{
+				MAC:           "AA:BB:CC:DD:EE:FF",
+				IP:            "10.5.50.42",
+				LinkLoginOnly: "http://10.5.50.1/login",
+				LinkOrig:      "http://example.com/",
+			},
+			RouterName:   "OrangePi-Lab",
+			RouterKnown:  true,
+			TrialEnabled: trial,
+			LoginURL:     "/portal/login",
+		}
+	}
+
+	withTrial := renderPage(t, "captive.html", view(true))
+	if !strings.Contains(withTrial, "Claim free time") {
+		t.Error("the free-time button is missing even though the profile allows trial login")
+	}
+	if !strings.Contains(withTrial, "10.5.50.1/login") {
+		t.Error("the free-time button does not post to the hotspot login URL")
+	}
+	// It is a live submit button now, never a data-soon placeholder.
+	if strings.Contains(withTrial, "Claim free time <span class=\"soon\">") {
+		t.Error("the free-time button is still marked coming soon")
+	}
+
+	withoutTrial := renderPage(t, "captive.html", view(false))
+	if strings.Contains(withoutTrial, "Claim free time") {
+		t.Error("the free-time button is shown even though the profile has no trial login")
 	}
 }
