@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -181,10 +182,10 @@ func (h *Handler) PortalAuthenticate(w http.ResponseWriter, r *http.Request) {
 	view.RouterKnown = true
 
 	// A free-time claim carries neither a voucher nor a username, so it must be
-	// handled before the "enter your code" guard below. The controller dials the
-	// router over its management connection and submits the same empty-credential
-	// hotspot login the device's own trial button does, so the router grants this
-	// client the trial time configured on its profile.
+	// handled before the "enter your code" guard below. RouterOS only starts a
+	// trial when the client itself presents an empty login to the hotspot's own
+	// login page, so this sends the guest's browser there and lets the router
+	// open the trial session for this device.
 	if r.FormValue("trial") == "1" {
 		h.portalClaimTrial(w, r, view, router, request)
 		return
@@ -300,12 +301,27 @@ func (h *Handler) portalPasswordLogin(w http.ResponseWriter, r *http.Request, vi
 // router start the trial session for this device - no voucher, no account.
 func (h *Handler) portalClaimTrial(w http.ResponseWriter, r *http.Request, view *portalPage, router database.Router, request portalRequest) {
 	// The hotspot login URL normally arrives with the redirect as
-	// link-login-only. A bare redirect carries none, so fall back to the address
-	// the device publishes for its own hotspot (the server profile's
-	// hotspot-address), read over the management connection.
+	// link-login-only. A bare redirect carries none, so fall back first to the
+	// address the device publishes for its own hotspot (the server profile's
+	// hotspot-address), and then to the router's management address: RouterOS
+	// serves the hotspot login page from the same www service the panel already
+	// reaches for the API, so http://<router>/login starts a trial even when no
+	// hotspot-address is configured.
 	if strings.TrimSpace(request.LinkLoginOnly) == "" && strings.TrimSpace(request.LinkLogin) == "" {
 		if derived := h.derivedHotspotLogin(r, router, request.ServerName); derived != "" {
 			request.LinkLoginOnly = derived
+		} else if derived := routerHotspotLogin(router); derived != "" {
+			request.LinkLoginOnly = derived
+		}
+	}
+
+	// A bare redirect carries no link-orig either, and with an empty dst
+	// RouterOS parks the browser on its own post-login page once the trial
+	// starts - which looks exactly like the button doing nothing. Send the guest
+	// back to this panel, where the session below shows the clock running.
+	if strings.TrimSpace(request.LinkOrig) == "" {
+		if base := portalBaseURL(r); base != "" {
+			request.LinkOrig = base + "/"
 		}
 	}
 
@@ -318,8 +334,35 @@ func (h *Handler) portalClaimTrial(w http.ResponseWriter, r *http.Request, view 
 		return
 	}
 
+	// The panel only trusts its own session table when deciding whether to
+	// render the connected view, and the sweeper does not import hotspot
+	// actives. Mirror the claim locally now, so the guest who lands back here
+	// one redirect later immediately sees the trial time running.
+	h.registerPortalSession(r.Context(), router, "trial", request, "free trial")
+
 	h.log.Info("granting free trial via the hotspot login endpoint", "router", router.Name, "ip", request.IP, "mac", request.MAC)
 	h.finishPortalLogin(w, r, view, request, "", "", false)
+}
+
+// routerHotspotLogin derives the hotspot login URL from the router's own
+// management record. RouterOS serves the hotspot login page on its www
+// service - the very port the panel's REST calls land on - so this is the
+// last-resort trial target when the redirect carried no link-login-only and
+// the server profile has no hotspot-address.
+func routerHotspotLogin(router database.Router) string {
+	host := strings.TrimSpace(router.Host)
+	if host == "" {
+		return ""
+	}
+	scheme := "http"
+	if router.UseTLS {
+		scheme = "https"
+	}
+	port := router.RestPort
+	if port == 0 || (scheme == "http" && port == 80) || (scheme == "https" && port == 443) {
+		return scheme + "://" + host + "/login"
+	}
+	return scheme + "://" + host + ":" + strconv.Itoa(port) + "/login"
 }
 
 // derivedHotspotLogin asks the device for the login URL of its own hotspot,

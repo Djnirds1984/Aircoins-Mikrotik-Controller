@@ -376,6 +376,90 @@ func TestPortalTrialClaimRedirectsToTheHotspotLogin(t *testing.T) {
 	}
 }
 
+// TestPortalTrialClaimOnBareRedirectReturnsTheGuestToThePanel covers the
+// operator's plain-redirect hotspot: no link-login-only in the request and no
+// hotspot-address on the profile, so the claim must fall back to the router's
+// own login page, send the guest back to the panel afterwards (an empty dst
+// strands the phone on the router's page and looks like a dead button), and
+// mirror the session so the returned page already shows the clock running.
+func TestPortalTrialClaimOnBareRedirectReturnsTheGuestToThePanel(t *testing.T) {
+	base, db := newCaptiveE2E(t, Config{})
+	if _, err := db.Routers().Create(context.Background(), database.Router{
+		Name: "cafe", Host: "127.0.0.1", Port: 1,
+		Username: "api", Password: "pw", DefaultPortal: true,
+	}); err != nil {
+		t.Fatalf("create router: %v", err)
+	}
+
+	// The bare redirect: the POST carries nothing but the trial flag.
+	resp, err := noRedirect().PostForm(base+portalLoginPath, url.Values{"trial": {"1"}})
+	if err != nil {
+		t.Fatalf("POST bare-redirect trial claim: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("trial claim status = %d, want a 303 redirect", resp.StatusCode)
+	}
+	loc := resp.Header.Get("Location")
+	if !strings.HasPrefix(loc, "http://127.0.0.1/login?") {
+		t.Fatalf("trial claim did not fall back to the router's login page: %q", loc)
+	}
+	parsed, err := url.Parse(loc)
+	if err != nil {
+		t.Fatalf("parse redirect: %v", err)
+	}
+	query := parsed.Query()
+	if values, ok := query["username"]; !ok || values[0] != "" {
+		t.Errorf("the trial redirect must carry an empty username, got %q", values)
+	}
+	if values, ok := query["password"]; !ok || values[0] != "" {
+		t.Errorf("the trial redirect must carry an empty password, got %q", values)
+	}
+	if got := query.Get("dst"); got != base+"/" {
+		t.Errorf("dst = %q, want the guest returned to this panel at %q", got, base+"/")
+	}
+	if got := query.Get("ip"); got != "127.0.0.1" {
+		t.Errorf("ip = %q, want the claim to carry the client address", got)
+	}
+
+	// And the panel must know about the session the moment the guest lands
+	// back: the trial claim mirrors it locally.
+	sessions, err := db.Sessions().List(context.Background(), database.SessionFilter{Status: "open", Query: "127.0.0.1", Limit: 10})
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	found := false
+	for _, session := range sessions {
+		if session.Address == "127.0.0.1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the trial claim did not register a local session for the client")
+	}
+}
+
+func TestRouterHotspotLogin(t *testing.T) {
+	cases := []struct {
+		name   string
+		router database.Router
+		want   string
+	}{
+		{"plain host uses the default www port", database.Router{Host: "10.0.0.1"}, "http://10.0.0.1/login"},
+		{"explicit plain port is kept", database.Router{Host: "10.0.0.1", RestPort: 8080}, "http://10.0.0.1:8080/login"},
+		{"port 80 is not spelled out", database.Router{Host: "10.0.0.1", RestPort: 80}, "http://10.0.0.1/login"},
+		{"tls uses https", database.Router{Host: "10.0.0.1", UseTLS: true, RestPort: 443}, "https://10.0.0.1/login"},
+		{"no host derives nothing", database.Router{}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := routerHotspotLogin(tc.router); got != tc.want {
+				t.Errorf("routerHotspotLogin(%+v) = %q, want %q", tc.router, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestDashboardAtRootRestoresTheLegacyLayout covers the escape hatch: an
 // operator who upgrades and wants the old / behaviour sets DASHBOARD_AT_ROOT
 // and must get the dashboard back, with the portal still reachable.
