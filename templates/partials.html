@@ -560,11 +560,14 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
 
   // A page rendered with no address and no MAC has nothing to poll for. The
   // controller would fall back to the request's own address, but on a kiosk
-  // behind NAT that is the wrong client, so the tab stays quiet instead of
-  // showing somebody else's balance.
-  if (!enabled || !subject || !timeEl) { return; }
+  // behind NAT that is the wrong client, so the balance readout stays quiet
+  // instead of showing somebody else's balance. This only gates the poller:
+  // the modal open/close wiring below is left unconditional so the "Insert
+  // coin" button still pops the dialog (and its "not set up" notice) even
+  // when the coin slot is unconfigured or there is no client subject.
+  var canPoll = enabled && !!subject && !!timeEl;
 
-  var lastSeconds = parseInt(timeEl.getAttribute('data-seconds'), 10) || 0;
+  var lastSeconds = timeEl ? (parseInt(timeEl.getAttribute('data-seconds'), 10) || 0) : 0;
   // Seeded from the server-rendered figure rather than zero, so the first
   // apply() does not briefly paint 0.00 over a balance the server already knew.
   var lastCents = amountEl ? (parseInt(amountEl.getAttribute('data-cents'), 10) || 0) : 0;
@@ -605,6 +608,7 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
   }
 
   function apply(data) {
+    if (!timeEl) { return; }
     var seconds = data.remaining_seconds || 0;
     if (seconds !== lastSeconds) {
       lastSeconds = seconds;
@@ -663,7 +667,7 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
   function isOpen() { return !modal.hasAttribute('hidden'); }
 
   function start() {
-    if (timer === null && isOpen()) {
+    if (timer === null && isOpen() && canPoll) {
       poll();
       timer = setInterval(poll, POLL_MS);
     }
