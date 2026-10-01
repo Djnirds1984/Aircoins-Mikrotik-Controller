@@ -180,6 +180,16 @@ func (h *Handler) PortalAuthenticate(w http.ResponseWriter, r *http.Request) {
 	view.RouterName = router.Name
 	view.RouterKnown = true
 
+	// A free-time claim carries neither a voucher nor a username, so it must be
+	// handled before the "enter your code" guard below. The controller dials the
+	// router over its management connection and submits the same empty-credential
+	// hotspot login the device's own trial button does, so the router grants this
+	// client the trial time configured on its profile.
+	if r.FormValue("trial") == "1" {
+		h.portalClaimTrial(w, r, view, router, request)
+		return
+	}
+
 	if voucherCode == "" && username == "" {
 		view.FormError = "Enter your voucher code, or your hotspot username and password."
 		h.renderPortal(w, r, http.StatusBadRequest, view)
@@ -279,6 +289,43 @@ func (h *Handler) portalPasswordLogin(w http.ResponseWriter, r *http.Request, vi
 	h.registerPortalSession(r.Context(), router, username, request, "password")
 	view.Success = true
 	h.finishPortalLogin(w, r, view, request, username, password, true)
+}
+
+// portalClaimTrial grants the guest a hotspot trial the same way the device's
+// own login page does when a customer presses "trial": it sends the router an
+// empty-credential login for this client, and a trial-enabled profile answers by
+// giving the device its configured trial time. No voucher or account is
+// involved. It is reached only from a CSRF-exempt /portal/ POST.
+func (h *Handler) portalClaimTrial(w http.ResponseWriter, r *http.Request, view *portalPage, router database.Router, request portalRequest) {
+	client, err := h.dialRouter(r.Context(), router)
+	if err != nil {
+		view.FormError = "The hotspot gateway cannot be reached right now (" + routerErrorHint(err) + "). Please try again in a moment."
+		h.renderPortal(w, r, http.StatusServiceUnavailable, view)
+		return
+	}
+	defer client.Close()
+
+	ctx, cancel := context.WithTimeout(r.Context(), h.cfg.APITimeout)
+	defer cancel()
+
+	if err := client.TrialLogin(ctx, request.MAC, request.IP); err != nil {
+		h.log.Info("free trial claim failed", "router", router.Name, "ip", request.IP, "mac", request.MAC, "error", err)
+		switch {
+		case errors.Is(err, ErrRouterUnreachable), errors.Is(err, ErrRouterTimeout):
+			view.FormError = "The hotspot gateway is not answering right now. Please try again in a moment."
+		case errors.Is(err, ErrRouterUnknownHost), errors.Is(err, ErrRouterNoCommand):
+			view.FormError = "This hotspot does not allow the controller to grant free time. Please ask the front desk."
+		default:
+			view.FormError = "Free time could not be granted right now: " + routerErrorHint(err)
+		}
+		h.renderPortal(w, r, http.StatusOK, view)
+		return
+	}
+
+	h.registerPortalSession(r.Context(), router, "trial", request, "trial")
+	view.Success = true
+	view.Notice = "Enjoy your free trial!"
+	h.finishPortalLogin(w, r, view, request, "", "", true)
 }
 
 // renderPortal writes the captive portal to the client.

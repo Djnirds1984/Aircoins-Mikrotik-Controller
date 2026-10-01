@@ -440,22 +440,20 @@ body.kiosk{
     {{else}}
     <div class="kiosk-actions">
       {{/* Free time is a real giveaway only when the hotspot server profile this
-           guest came through lists "trial" in its login-by set. When it does,
-           the button posts to the device's own login URL, which is what starts
-           a trial session. Otherwise the button is not dimmed or disabled - it
-           is not rendered at all, because a dead control on a public kiosk is a
-           support call. When the redirect carried no link-login-only (a plain jump
-           to the panel address), the action falls back to .TrialURL - the device's
-           own login endpoint read live from its hotspot profile - so the button
-           still has a working target; if that is empty too, the form is not shown. */}}
+           guest came through lists "trial" in its login-by set. When it does, the
+           button posts back to the controller, which sends the router the same
+           empty-credential hotspot login the device's own trial button performs,
+           so the router grants this client's MAC/IP the trial time configured on
+           the profile - no voucher, no account. Keeping the grant server-side
+           means it works on a plain redirect and never trips the panel's CSRF
+           guard. Otherwise the button is not dimmed or disabled - it is not
+           rendered at all, because a dead control on a public kiosk is a support
+           call. */}}
       {{if .TrialEnabled}}
-        {{$trial := .Portal.LinkLoginOnly}}{{if not $trial}}{{$trial = .Portal.LinkLogin}}{{end}}{{if not $trial}}{{$trial = .TrialURL}}{{end}}
-        {{if $trial}}
-        <form method="post" action="{{$trial}}" style="margin:0">
-          {{if .Portal.LinkOrig}}<input type="hidden" name="dst" value="{{.Portal.LinkOrig}}">{{end}}
+        <form method="post" action="{{portalAction .Portal}}" style="margin:0">
+          <input type="hidden" name="trial" value="1">
           <button class="kiosk-btn grey" type="submit">{{icon "gift"}} Claim free time</button>
         </form>
-        {{end}}
       {{end}}
 
       {{/* The only action in the stack that is wired up. It opens the INSERT COIN

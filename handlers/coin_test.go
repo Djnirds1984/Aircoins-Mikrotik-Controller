@@ -701,9 +701,11 @@ func TestKioskClockCountsDownTheCoinCredit(t *testing.T) {
 }
 
 // TestKioskClaimFreeTimeIsConditionalOnTrial pins the free-time button to the
-// hotspot server profile: it renders (as a real form posting to the device's own
-// login URL) only when trial login is available, and disappears completely when
-// it is not, so a kiosk never shows a giveaway the router would refuse.
+// hotspot server profile: it renders only when trial login is available, and the
+// claim posts back to the controller (never straight to the router) so the panel
+// grants the trial over the management API. It disappears entirely when the
+// profile has no trial login, so a kiosk never shows a giveaway the router would
+// refuse.
 func TestKioskClaimFreeTimeIsConditionalOnTrial(t *testing.T) {
 	view := func(trial bool) *captivePage {
 		return &captivePage{
@@ -725,8 +727,13 @@ func TestKioskClaimFreeTimeIsConditionalOnTrial(t *testing.T) {
 	if !strings.Contains(withTrial, "Claim free time") {
 		t.Error("the free-time button is missing even though the profile allows trial login")
 	}
-	if !strings.Contains(withTrial, "10.5.50.1/login") {
-		t.Error("the free-time button does not post to the hotspot login URL")
+	// The claim carries the trial flag and posts to the controller, which dials
+	// the router for us; it must never aim straight at the device's login URL.
+	if !strings.Contains(withTrial, `name="trial" value="1"`) {
+		t.Error("the free-time form does not carry the trial flag")
+	}
+	if strings.Contains(withTrial, `action="http://10.5.50.1/login"`) {
+		t.Error("the free-time form posts directly to the router instead of the controller")
 	}
 	// It is a live submit button now, never a data-soon placeholder.
 	if strings.Contains(withTrial, "Claim free time <span class=\"soon\">") {
@@ -739,33 +746,33 @@ func TestKioskClaimFreeTimeIsConditionalOnTrial(t *testing.T) {
 	}
 }
 
-// TestKioskClaimFreeTimeFallsBackToProfileLoginURL covers the plain-redirect
-// kiosk: a guest that joins the SSID and is jumped to the panel address arrives
-// with NO hotspot query string, so Portal.LinkLoginOnly/LinkLogin are empty. The
-// button must still render when the profile allows trial, posting to .TrialURL
-// (the device's own login endpoint read live from its profile), and must stay
-// hidden when no URL resolves at all so the kiosk never shows an actionless form.
-func TestKioskClaimFreeTimeFallsBackToProfileLoginURL(t *testing.T) {
-	kiosk := func(trial bool, trialURL string) *captivePage {
+// TestKioskClaimFreeTimeWorksOnPlainRedirect covers the guest that joins the
+// SSID and is jumped to the panel address with NO hotspot query string: Portal is
+// empty. Because the controller grants the trial server-side over its management
+// connection, the button must still render whenever the profile allows trial and
+// post to the bare /portal/login (the controller reads the client from the
+// request source), so a plain redirect needs no router login URL at all.
+func TestKioskClaimFreeTimeWorksOnPlainRedirect(t *testing.T) {
+	kiosk := func(trial bool) *captivePage {
 		return &captivePage{
 			page:         samplePage("Wi-Fi sign in", ""),
 			RouterName:   "OrangePi-Lab",
 			RouterKnown:  true,
 			TrialEnabled: trial,
-			TrialURL:     trialURL,
+			LoginURL:     "/portal/login",
 		}
 	}
 
-	withFallback := renderPage(t, "captive.html", kiosk(true, "http://10.0.0.1/login"))
-	if !strings.Contains(withFallback, "Claim free time") {
+	withTrial := renderPage(t, "captive.html", kiosk(true))
+	if !strings.Contains(withTrial, "Claim free time") {
 		t.Error("free-time button missing on a plain-redirect kiosk whose profile allows trial")
 	}
-	if !strings.Contains(withFallback, `action="http://10.0.0.1/login"`) {
-		t.Error("free-time button does not post to the profile-derived login URL")
+	if !strings.Contains(withTrial, `action="/portal/login"`) {
+		t.Error("the free-time form does not post to the controller on a plain redirect")
 	}
 
-	withNoURL := renderPage(t, "captive.html", kiosk(true, ""))
-	if strings.Contains(withNoURL, "Claim free time") {
-		t.Error("free-time button shown with no login URL to post to")
+	withoutTrial := renderPage(t, "captive.html", kiosk(false))
+	if strings.Contains(withoutTrial, "Claim free time") {
+		t.Error("free-time button shown even though the profile has no trial login")
 	}
 }

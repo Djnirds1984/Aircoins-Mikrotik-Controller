@@ -1039,6 +1039,16 @@ func (c *MikrotikClient) HotspotLogin(ctx context.Context, user, password, mac, 
 	return err
 }
 
+// TrialLogin grants a hotspot trial to a client the way the device's own login
+// page does when a guest taps "trial": it submits an empty-credential login for
+// that client's address (and MAC when known). A trial-enabled profile answers by
+// giving the device the trial time configured on it, tied to the MAC - no
+// voucher and no account are involved. It reuses the same API login the password
+// path uses, only with blank credentials.
+func (c *MikrotikClient) TrialLogin(ctx context.Context, mac, ip string) error {
+	return c.HotspotLogin(ctx, "", "", mac, ip)
+}
+
 // IPBinding is one entry of /ip/hotspot/ip-binding/print.
 type IPBinding struct {
 	ID         string
