@@ -338,6 +338,10 @@ func TestCoinTabRendersOnThePortal(t *testing.T) {
 		`data-subject="mac:aabbccddeeff"`,
 		`data-status-url="` + coinStatusPath + `"`,
 		"Insert coin",
+		// The idle auto-close countdown element. It renders hidden and empty;
+		// coinScript fills it and dismisses the dialog after a minute with no
+		// coin so an abandoned kiosk frees up for the next customer.
+		`id="coin-idle"`,
 		// The opener and the dialog are paired by aria-controls, and coinScript
 		// resolves that pairing. If the button points at a stale id the modal
 		// never opens and the whole coin flow is dead on arrival.
@@ -362,6 +366,12 @@ func TestCoinTabRendersOnThePortal(t *testing.T) {
 	// dialog sees nothing happen and assumes the acceptor ate their coin.
 	if !strings.Contains(body, "POLL_MS = 1000") {
 		t.Error("the coin modal is not polling every second")
+	}
+	// The idle dialog must auto-close after a minute with no coin, so the kiosk
+	// is not left blocking the next customer. The limit is a fixed 60s and the
+	// countdown element is what the script drives.
+	if !strings.Contains(body, "IDLE_LIMIT = 60") {
+		t.Error("the coin modal does not auto-close after 60 idle seconds")
 	}
 }
 

@@ -252,6 +252,16 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
 .coin-cell.pulse .value{animation:coinPulse .6s ease-out}
 @keyframes coinPulse{0%{transform:scale(1)}35%{transform:scale(1.12)}100%{transform:scale(1)}}
 .coin #coin-hint{min-height:1.4em}
+/* The idle auto-close countdown. A kiosk left sitting on this dialog with no
+   coin inserted blocks the next customer, so after a minute it dismisses
+   itself. Muted and centred, with tabular figures so the ticking number does
+   not jiggle the line width. */
+.coin-idle{
+  margin:12px 0 0; text-align:center;
+  color:var(--muted); font-size:.8rem;
+  font-variant-numeric:tabular-nums;
+}
+.coin-idle[hidden]{display:none}
 </style>{{end}}
 
 {{define "portalStarter"}}
@@ -396,6 +406,13 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
           <div class="value" id="coin-amount" data-cents="{{.Coin.AmountCents}}">{{if .Coin.MoneyLabel}}{{.Coin.MoneyLabel}}{{else}}0.00{{end}}</div>
         </div>
       </div>
+
+      {{/* The idle auto-close countdown. It starts hidden and is filled by
+           coinScript the moment the dialog opens: if no coin lands within a
+           minute the modal dismisses itself so the next customer can use the
+           slot. The instant a coin is credited the script hides this line and
+           cancels the timer, so a customer mid-payment is never cut off. */}}
+      <p class="coin-idle" id="coin-idle" role="status" aria-live="polite" hidden></p>
 
       {{/* aria-live so a screen reader announces the balance as each coin
            lands. A customer using assistive tech gets the same feedback a
@@ -556,7 +573,17 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
   var amountEl = document.getElementById('coin-amount');
   var hintEl = document.getElementById('coin-hint');
   var button = document.getElementById('coin-connect');
+  var idleEl = document.getElementById('coin-idle');
   var timer = null;
+
+  // An idle kiosk must not sit on this dialog forever: after IDLE_LIMIT seconds
+  // with no coin inserted it dismisses itself so the next customer can use the
+  // slot. The countdown is cancelled for good the moment any credit lands, so a
+  // customer who is paying is never cut off mid-insertion.
+  var IDLE_LIMIT = 60;
+  var idleTimer = null;
+  var idleLeft = IDLE_LIMIT;
+  var idleDone = false;
 
   // A page rendered with no address and no MAC has nothing to poll for. The
   // controller would fall back to the request's own address, but on a kiosk
@@ -629,6 +656,8 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
     if (seconds > 0) {
       setHint('Credit ready. Press "Done paying - Connect" when you have finished inserting coins.');
       if (button) { button.disabled = false; }
+      // A coin landed: stop counting down and never auto-close on this customer.
+      cancelIdle();
     } else {
       setHint('Insert a coin to start.');
       if (button) { button.disabled = true; }
@@ -680,6 +709,51 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
     }
   }
 
+  // The idle auto-close runs on its own 1s ticker rather than as a branch
+  // inside poll(): it must keep counting even when polling is unavailable (no
+  // subject, or the slot is unconfigured) and must not be thrown off by a slow
+  // or failed balance request.
+  function renderIdle() {
+    if (!idleEl) { return; }
+    if (idleDone) { idleEl.hidden = true; return; }
+    idleEl.hidden = false;
+    idleEl.textContent = 'Waiting for a coin - this screen closes itself in ' + idleLeft + 's';
+  }
+
+  function idleTick() {
+    if (idleDone) { stopIdle(); return; }
+    idleLeft -= 1;
+    if (idleLeft <= 0) {
+      idleLeft = 0;
+      renderIdle();
+      // No coin in a minute: free the kiosk for the next customer.
+      close();
+      return;
+    }
+    renderIdle();
+  }
+
+  function startIdle() {
+    if (idleDone || idleTimer !== null) { return; }
+    renderIdle();
+    idleTimer = setInterval(idleTick, 1000);
+  }
+
+  function stopIdle() {
+    if (idleTimer !== null) {
+      clearInterval(idleTimer);
+      idleTimer = null;
+    }
+  }
+
+  // Called once credit is standing: the customer is paying, so the auto-close
+  // is cancelled for the rest of this dialog's life.
+  function cancelIdle() {
+    idleDone = true;
+    stopIdle();
+    renderIdle();
+  }
+
   // Paint the server-rendered state first, so the counter is already right on
   // first open rather than after the first round trip.
   apply({ remaining_seconds: lastSeconds, amount_cents: lastCents });
@@ -692,6 +766,11 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
     var focusTarget = button && !button.disabled ? button : modal.querySelector('.coin-close');
     if (focusTarget && focusTarget.focus) { focusTarget.focus(); }
     start();
+    // A fresh countdown every time the dialog opens, unless credit is already
+    // standing - then there is nothing to wait for and the timer stays off.
+    idleDone = lastSeconds > 0;
+    idleLeft = IDLE_LIMIT;
+    startIdle();
   }
 
   function close() {
@@ -699,6 +778,7 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
     // and the backdrop both stop working the moment focus moves elsewhere.
     modal.setAttribute('hidden', '');
     stop();
+    stopIdle();
     if (opener && opener.focus) { opener.focus(); }
   }
 
@@ -732,7 +812,7 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
   });
 
   document.addEventListener('visibilitychange', function () {
-    if (document.hidden) { stop(); } else { start(); }
+    if (document.hidden) { stop(); stopIdle(); } else { start(); startIdle(); }
   });
 
   if (button) {
@@ -740,6 +820,7 @@ body.portal[style*="background-image"] .field input,body.portal[style*="backgrou
       // Stop polling the moment the customer commits, so a response that
       // arrives mid-navigation cannot repaint the page underneath the redirect.
       stop();
+      stopIdle();
       button.textContent = 'Connecting...';
       button.disabled = true;
     });
