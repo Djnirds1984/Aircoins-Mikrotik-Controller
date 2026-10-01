@@ -327,6 +327,55 @@ func TestCaptivePortalGreetsAnOnlineClient(t *testing.T) {
 	}
 }
 
+// TestPortalTrialClaimRedirectsToTheHotspotLogin covers the free-trial grant:
+// a POST carrying trial=1 must send the guest's browser to the hotspot's own
+// login endpoint with empty credentials, which is what starts a RouterOS trial.
+// The API login refuses blank credentials ("username is missing"), so the grant
+// is a redirect, not a server-side call. link-login-only is present, so no
+// router dial is needed.
+func TestPortalTrialClaimRedirectsToTheHotspotLogin(t *testing.T) {
+	base, db := newCaptiveE2E(t, Config{})
+	if _, err := db.Routers().Create(context.Background(), database.Router{
+		Name: "cafe", Host: "192.168.88.1", Port: 8728,
+		Username: "api", Password: "pw", DefaultPortal: true,
+	}); err != nil {
+		t.Fatalf("create router: %v", err)
+	}
+
+	resp, err := noRedirect().PostForm(base+portalLoginPath, url.Values{
+		"trial":           {"1"},
+		"ip":              {"192.168.88.55"},
+		"mac":             {"AA:BB:CC:DD:EE:FF"},
+		"link-login-only": {"http://192.168.88.1/login"},
+		"link-orig":       {"http://example.com/"},
+	})
+	if err != nil {
+		t.Fatalf("POST trial claim: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("trial claim status = %d, want a 303 redirect", resp.StatusCode)
+	}
+	loc := resp.Header.Get("Location")
+	if !strings.HasPrefix(loc, "http://192.168.88.1/login?") {
+		t.Fatalf("the trial claim did not redirect to the hotspot login URL: %q", loc)
+	}
+	parsed, err := url.Parse(loc)
+	if err != nil {
+		t.Fatalf("parse redirect: %v", err)
+	}
+	query := parsed.Query()
+	if values, ok := query["username"]; !ok || values[0] != "" {
+		t.Errorf("the trial redirect must carry an empty username, got %q", values)
+	}
+	if values, ok := query["password"]; !ok || values[0] != "" {
+		t.Errorf("the trial redirect must carry an empty password, got %q", values)
+	}
+	if got := query.Get("dst"); got != "http://example.com/" {
+		t.Errorf("dst = %q, want the guest's original destination", got)
+	}
+}
+
 // TestDashboardAtRootRestoresTheLegacyLayout covers the escape hatch: an
 // operator who upgrades and wants the old / behaviour sets DASHBOARD_AT_ROOT
 // and must get the dashboard back, with the portal still reachable.

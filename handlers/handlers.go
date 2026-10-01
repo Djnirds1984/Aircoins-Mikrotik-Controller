@@ -437,6 +437,9 @@ func (h *Handler) adminRoutes() *http.ServeMux {
 	mux.HandleFunc("POST "+portalEditorSavePath, h.PortalEditorSave)
 	mux.HandleFunc("POST "+portalEditorBackgroundPath, h.PortalEditorBackground)
 	mux.HandleFunc("POST "+portalEditorBackgroundDrop, h.PortalEditorBackgroundDelete)
+	// One-click install of the guest login page onto every router, replacing the
+	// manual /tool fetch the operator would otherwise repeat after each deploy.
+	mux.HandleFunc("POST "+portalEditorInstallPath, h.PortalRouterInstall)
 
 	// REST API (RouterOS v7+ compatible).
 	h.RoutesAPI(mux)

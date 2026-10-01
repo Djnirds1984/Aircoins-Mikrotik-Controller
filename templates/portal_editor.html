@@ -169,6 +169,19 @@
     </p>
 
     {{if .RouterLoginURL}}
+      {{/* One click does what the two RouterOS commands below do by hand: it
+           makes every registered router fetch this panel's redirect login page
+           over its management API and verifies the file landed. The redirect
+           page carries no Go template tags, so once installed it survives
+           controller updates - you do NOT repeat this after running install.sh. */}}
+      <form method="post" action="{{.AdminPath}}/portal-editor/install-router-page" style="margin:0 0 14px">
+        {{template "csrf" .}}
+        <div class="btn-row" style="margin:0">
+          <button class="btn primary" type="submit">{{icon "download"}} Install / repair the guest page on my routers</button>
+        </div>
+        <p class="hint" style="margin-top:8px">Runs the fetch for you on every registered router and reports the result. Use it if guests see a broken or built-in MikroTik page.</p>
+      </form>
+      <p class="hint"><strong>Or do it by hand</strong> on each router:</p>
       <ol class="hint" style="padding-left:20px">
         <li>
           <strong>Check where the router keeps its hotspot pages.</strong>

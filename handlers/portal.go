@@ -292,40 +292,53 @@ func (h *Handler) portalPasswordLogin(w http.ResponseWriter, r *http.Request, vi
 }
 
 // portalClaimTrial grants the guest a hotspot trial the same way the device's
-// own login page does when a customer presses "trial": it sends the router an
-// empty-credential login for this client, and a trial-enabled profile answers by
-// giving the device its configured trial time. No voucher or account is
-// involved. It is reached only from a CSRF-exempt /portal/ POST.
+// own login page does when a customer taps "trial". RouterOS opens a trial when
+// a client presents an EMPTY login to the hotspot's own login endpoint; the API
+// command /ip/hotspot/active/login refuses blank credentials ("username is
+// missing"), so the grant cannot be issued from the server. Instead we send the
+// guest's browser to the hotspot login URL with empty credentials and let the
+// router start the trial session for this device - no voucher, no account.
 func (h *Handler) portalClaimTrial(w http.ResponseWriter, r *http.Request, view *portalPage, router database.Router, request portalRequest) {
-	client, err := h.dialRouter(r.Context(), router)
-	if err != nil {
-		view.FormError = "The hotspot gateway cannot be reached right now (" + routerErrorHint(err) + "). Please try again in a moment."
-		h.renderPortal(w, r, http.StatusServiceUnavailable, view)
-		return
-	}
-	defer client.Close()
-
-	ctx, cancel := context.WithTimeout(r.Context(), h.cfg.APITimeout)
-	defer cancel()
-
-	if err := client.TrialLogin(ctx, request.MAC, request.IP); err != nil {
-		h.log.Info("free trial claim failed", "router", router.Name, "ip", request.IP, "mac", request.MAC, "error", err)
-		switch {
-		case errors.Is(err, ErrRouterUnreachable), errors.Is(err, ErrRouterTimeout):
-			view.FormError = "The hotspot gateway is not answering right now. Please try again in a moment."
-		case errors.Is(err, ErrRouterUnknownHost), errors.Is(err, ErrRouterNoCommand):
-			view.FormError = "This hotspot does not allow the controller to grant free time. Please ask the front desk."
-		default:
-			view.FormError = "Free time could not be granted right now: " + routerErrorHint(err)
+	// The hotspot login URL normally arrives with the redirect as
+	// link-login-only. A bare redirect carries none, so fall back to the address
+	// the device publishes for its own hotspot (the server profile's
+	// hotspot-address), read over the management connection.
+	if strings.TrimSpace(request.LinkLoginOnly) == "" && strings.TrimSpace(request.LinkLogin) == "" {
+		if derived := h.derivedHotspotLogin(r, router, request.ServerName); derived != "" {
+			request.LinkLoginOnly = derived
 		}
+	}
+
+	// hotspotFallbackURL builds <login>?username=&password=&dst=... which is
+	// exactly the empty-credential login that starts a trial. An empty result
+	// means we have no address for this hotspot's own login page.
+	if hotspotFallbackURL(request, "", "") == "" {
+		view.FormError = "This hotspot did not give us its own login address, so the free trial cannot be started. Reconnect to the Wi-Fi and try again, or ask the front desk."
 		h.renderPortal(w, r, http.StatusOK, view)
 		return
 	}
 
-	h.registerPortalSession(r.Context(), router, "trial", request, "trial")
-	view.Success = true
-	view.Notice = "Enjoy your free trial!"
-	h.finishPortalLogin(w, r, view, request, "", "", true)
+	h.log.Info("granting free trial via the hotspot login endpoint", "router", router.Name, "ip", request.IP, "mac", request.MAC)
+	h.finishPortalLogin(w, r, view, request, "", "", false)
+}
+
+// derivedHotspotLogin asks the device for the login URL of its own hotspot,
+// read from the server profile's hotspot-address. It is the last-resort trial
+// target when the redirect carried no link-login-only, and degrades to an empty
+// string on any dial or read error so the caller can show a friendly message.
+func (h *Handler) derivedHotspotLogin(r *http.Request, router database.Router, serverName string) string {
+	client, err := h.dialRouter(r.Context(), router)
+	if err != nil {
+		return ""
+	}
+	defer client.Close()
+	ctx, cancel := context.WithTimeout(r.Context(), h.cfg.APITimeout)
+	defer cancel()
+	_, loginURL, err := client.HotspotTrial(ctx, serverName)
+	if err != nil {
+		return ""
+	}
+	return loginURL
 }
 
 // renderPortal writes the captive portal to the client.

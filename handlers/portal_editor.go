@@ -49,6 +49,10 @@ const (
 	portalEditorSavePath       = "/portal-editor/save"
 	portalEditorBackgroundPath = "/portal-editor/background"
 	portalEditorBackgroundDrop = "/portal-editor/background/delete"
+	// portalEditorInstallPath runs the router-side fetch that points each
+	// hotspot at this panel's login page, so the operator never retypes
+	// /tool fetch after a deploy.
+	portalEditorInstallPath = "/portal-editor/install-router-page"
 )
 
 // portalEditorDefaults are the values the editor needs to describe its own
@@ -385,6 +389,74 @@ func (h *Handler) PortalEditorSave(w http.ResponseWriter, r *http.Request) {
 
 	setFlash(w, "Portal appearance saved. Guests see it on their next page load.", "ok")
 	http.Redirect(w, r, h.cfg.AdminPath+portalEditorPath, http.StatusSeeOther)
+}
+
+// PortalRouterInstall points every registered hotspot at this panel by making
+// each router fetch the redirect login page over its management API. It is the
+// one-click version of the /tool fetch an operator would otherwise retype on
+// every site: the panel generates that page live and it carries no Go template
+// tags, so once installed it survives controller updates and never needs
+// refreshing. A stale copy of the built-in template is exactly what shows
+// guests raw {{ }} text, and this replaces it with the working redirect.
+func (h *Handler) PortalRouterInstall(w http.ResponseWriter, r *http.Request) {
+	back := h.cfg.AdminPath + portalEditorPath
+	ctx := r.Context()
+
+	// The router reaches the panel over the address this request came in on.
+	// Without it the fetch URL would be empty and every router would fail.
+	base := portalBaseURL(r)
+	if base == "" {
+		h.flashAndRedirect(w, r, back, "err",
+			"The address of this panel could not be determined from the request, so the routers cannot be pointed at it. Open the panel through its real address and try again.")
+		return
+	}
+	fetchURL := base + portalRouterLoginPath
+
+	routers, err := h.db.Routers().List(ctx)
+	if err != nil {
+		h.fail(w, r, "load router inventory", err)
+		return
+	}
+	if len(routers) == 0 {
+		h.flashAndRedirect(w, r, back, "err",
+			"No routers are registered yet, so there is nowhere to install the portal page. Add the hotspot under Routers first.")
+		return
+	}
+
+	var installed, problems []string
+	for _, router := range routers {
+		client, err := h.dialRouter(ctx, router)
+		if err != nil {
+			problems = append(problems, router.Name+": unreachable ("+routerErrorHint(err)+")")
+			continue
+		}
+		// The fetch is a round trip the router makes to the panel, so give it a
+		// little more room than a plain API call needs.
+		callCtx, cancel := context.WithTimeout(ctx, h.cfg.APITimeout+5*time.Second)
+		result, installErr := client.InstallHotspotPortal(callCtx, fetchURL)
+		cancel()
+		client.Close()
+		switch {
+		case installErr != nil:
+			problems = append(problems, router.Name+": "+routerErrorHint(installErr))
+		case !result.Verified:
+			problems = append(problems, router.Name+": the router reported no usable file at "+result.DestPath)
+		default:
+			installed = append(installed, router.Name)
+		}
+	}
+
+	switch {
+	case len(problems) == 0:
+		h.flashAndRedirect(w, r, back, "ok",
+			"Portal login page installed and verified on "+strconv.Itoa(len(installed))+
+				" router(s). Guests now reach this panel, and future controller updates do not need this repeated.")
+	case len(installed) > 0:
+		h.flashAndRedirect(w, r, back, "warn",
+			"Installed on "+strconv.Itoa(len(installed))+" router(s); problems: "+strings.Join(problems, "; "))
+	default:
+		h.flashAndRedirect(w, r, back, "err", "Could not install the portal page: "+strings.Join(problems, "; "))
+	}
 }
 
 // PortalEditorBackground accepts a JPEG or PNG upload and stores it as the
