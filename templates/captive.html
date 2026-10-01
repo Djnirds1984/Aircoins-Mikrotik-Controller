@@ -441,13 +441,14 @@ body.kiosk{
     <div class="kiosk-actions">
       {{/* Free time is a real giveaway only when the hotspot server profile this
            guest came through lists "trial" in its login-by set. When it does, the
-           button posts back to the controller, which then redirects this
-           browser to the hotspot's own login page with empty credentials -
-           exactly what the device's built-in trial button does - so the router
-           opens the trial session configured on the profile and brings the
-           guest back here with the clock running. The POST only ever lands on
-           the controller's CSRF-exempt portal route, so it works on a plain
-           redirect. Otherwise the button is not dimmed or disabled - it is not
+           button posts back to the controller, which then hands this browser a
+           one-shot form that submits the empty login the hotspot's own page
+           uses - a plain redirect is not enough, RouterOS only opens a trial on
+           the SUBMIT - so the router opens the trial session configured on the
+           profile and brings the guest back here with the clock running. The
+           POST only ever lands on the controller's CSRF-exempt portal route,
+           so it works on a plain redirect. Otherwise the button is not dimmed
+           or disabled - it is not
            rendered at all, because a dead control on a public kiosk is a support
            call. */}}
       {{if .TrialEnabled}}

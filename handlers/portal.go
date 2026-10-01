@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"html/template"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -294,11 +295,12 @@ func (h *Handler) portalPasswordLogin(w http.ResponseWriter, r *http.Request, vi
 
 // portalClaimTrial grants the guest a hotspot trial the same way the device's
 // own login page does when a customer taps "trial". RouterOS opens a trial when
-// a client presents an EMPTY login to the hotspot's own login endpoint; the API
+// a client SUBMITS an EMPTY login to the hotspot's own login endpoint; the API
 // command /ip/hotspot/active/login refuses blank credentials ("username is
-// missing"), so the grant cannot be issued from the server. Instead we send the
-// guest's browser to the hotspot login URL with empty credentials and let the
-// router start the trial session for this device - no voucher, no account.
+// missing"), so the grant cannot be issued from the server. And a GET to the
+// login URL only ever serves the login page back - which bounces the guest to
+// this panel and makes the button look dead - so the handoff must be a POST
+// form, exactly like the one the built-in login.html submits.
 func (h *Handler) portalClaimTrial(w http.ResponseWriter, r *http.Request, view *portalPage, router database.Router, request portalRequest) {
 	// The hotspot login URL normally arrives with the redirect as
 	// link-login-only. A bare redirect carries none, so fall back first to the
@@ -325,10 +327,9 @@ func (h *Handler) portalClaimTrial(w http.ResponseWriter, r *http.Request, view 
 		}
 	}
 
-	// hotspotFallbackURL builds <login>?username=&password=&dst=... which is
-	// exactly the empty-credential login that starts a trial. An empty result
-	// means we have no address for this hotspot's own login page.
-	if hotspotFallbackURL(request, "", "") == "" {
+	// An empty endpoint means we have no address for this hotspot's own login
+	// page, so there is nowhere to submit the empty form to.
+	if hotspotLoginEndpoint(request) == "" {
 		view.FormError = "This hotspot did not give us its own login address, so the free trial cannot be started. Reconnect to the Wi-Fi and try again, or ask the front desk."
 		h.renderPortal(w, r, http.StatusOK, view)
 		return
@@ -337,11 +338,48 @@ func (h *Handler) portalClaimTrial(w http.ResponseWriter, r *http.Request, view 
 	// The panel only trusts its own session table when deciding whether to
 	// render the connected view, and the sweeper does not import hotspot
 	// actives. Mirror the claim locally now, so the guest who lands back here
-	// one redirect later immediately sees the trial time running.
+	// after the trial login immediately sees the clock running.
 	h.registerPortalSession(r.Context(), router, "trial", request, "free trial")
 
-	h.log.Info("granting free trial via the hotspot login endpoint", "router", router.Name, "ip", request.IP, "mac", request.MAC)
-	h.finishPortalLogin(w, r, view, request, "", "", false)
+	h.log.Info("handing the guest an empty-credential hotspot login form", "router", router.Name, "ip", request.IP, "mac", request.MAC)
+	h.renderTrialHandoff(w, r, request)
+}
+
+// renderTrialHandoff returns the one-shot page that submits the empty login.
+//
+// It carries the same hidden fields the router's built-in login.html posts on a
+// trial press - empty username and password, plus the dst to return to - and
+// fires itself off with a script so the guest only sees a flash, with a
+// noscript fallback button for the rare client without JavaScript.
+func (h *Handler) renderTrialHandoff(w http.ResponseWriter, r *http.Request, request portalRequest) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	var b strings.Builder
+	b.WriteString(`<!doctype html><html><head><meta charset="utf-8"><title>Starting free trial</title></head>`)
+	b.WriteString(`<body style="font-family:sans-serif;padding:2em">`)
+	b.WriteString(`<form id="trial" method="post" action="`)
+	b.WriteString(template.HTMLEscapeString(hotspotLoginEndpoint(request)))
+	b.WriteString(`"><input type="hidden" name="username" value=""><input type="hidden" name="password" value="">`)
+	if dst := safeRedirectURL(request.LinkOrig); dst != "" {
+		b.WriteString(`<input type="hidden" name="dst" value="`)
+		b.WriteString(template.HTMLEscapeString(dst))
+		b.WriteString(`">`)
+	}
+	b.WriteString(`<input type="hidden" name="popup" value="true"></form>`)
+	b.WriteString(`<p>Starting your free trial&hellip;</p>`)
+	b.WriteString(`<script>document.getElementById("trial").submit();</script>`)
+	b.WriteString(`<noscript><button onclick='document.getElementById("trial").submit()'>Start free trial</button></noscript>`)
+	b.WriteString(`</body></html>`)
+	_, _ = w.Write([]byte(b.String()))
+}
+
+// hotspotLoginEndpoint returns the hotspot's own login address as carried by
+// the request, or "" when the redirect gave us nothing usable.
+func hotspotLoginEndpoint(request portalRequest) string {
+	if base := safeRedirectURL(request.LinkLoginOnly); base != "" {
+		return base
+	}
+	return safeRedirectURL(request.LinkLogin)
 }
 
 // routerHotspotLogin derives the hotspot login URL from the router's own
@@ -468,10 +506,7 @@ func (h *Handler) portalRedirectTarget(request portalRequest) string {
 // hotspotFallbackURL builds the MikroTik login-only URL that completes the
 // login in the browser when the API path is unavailable.
 func hotspotFallbackURL(request portalRequest, username, password string) string {
-	base := safeRedirectURL(request.LinkLoginOnly)
-	if base == "" {
-		base = safeRedirectURL(request.LinkLogin)
-	}
+	base := hotspotLoginEndpoint(request)
 	if base == "" {
 		return ""
 	}

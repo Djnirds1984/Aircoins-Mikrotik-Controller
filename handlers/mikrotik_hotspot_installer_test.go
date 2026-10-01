@@ -37,7 +37,7 @@ func portalStub(t *testing.T, commands *[]string, serverDir, fileSize string) *h
 				_, _ = w.Write([]byte(`[]`))
 				return
 			}
-			_, _ = w.Write([]byte(`[{"name":"` + serverDir + `/login.html","size":"` + fileSize + `"}]`))
+			_, _ = w.Write([]byte(`[{".id":"*1","name":"` + serverDir + `/login.html","size":"` + fileSize + `"}]`))
 		default:
 			_, _ = w.Write([]byte(`{}`))
 		}
@@ -84,6 +84,17 @@ func TestInstallHotspotPortalFetchesAndVerifies(t *testing.T) {
 	}
 
 	joined := strings.Join(commands, "\n")
+	// The stale file must be REMOVED before the fetch: /tool fetch does not
+	// overwrite an existing login.html, and an install that skips the removal
+	// leaves the broken page in place while reporting success.
+	removeAt := strings.Index(joined, "DELETE /rest/file")
+	fetchAt := strings.Index(joined, "POST /rest/tool/fetch")
+	if removeAt < 0 {
+		t.Fatalf("the install did not remove the old login page first: %v", commands)
+	}
+	if fetchAt < 0 || removeAt > fetchAt {
+		t.Fatalf("the old login page was not removed before the fetch: %v", commands)
+	}
 	// The fetch has to carry the URL, the destination and mode=http; without
 	// the mode the router may attempt TLS against a plain panel.
 	//
@@ -155,6 +166,63 @@ func TestInstallHotspotPortalReportsAFailedFetch(t *testing.T) {
 			}
 			if !strings.Contains(strings.Join(result.Steps, " "), tc.words) {
 				t.Errorf("the steps do not explain the failure: %v", result.Steps)
+			}
+		})
+	}
+}
+
+// TestInstallHotspotPortalRefusesBrokenContents pins the lie this install used
+// to tell: a login page that still carries Go template syntax must never be
+// reported as verified, because the guests keep seeing the scrambled page while
+// the panel claims success.
+func TestInstallHotspotPortalRefusesBrokenContents(t *testing.T) {
+	var commands []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		commands = append(commands, r.Method+" "+r.URL.Path+" "+string(raw))
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/rest/ip/hotspot" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`[{"name":"hotspot1","html-directory":"hotspot"}]`))
+		case r.URL.Path == "/rest/ip/hotspot/profile" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`[{"name":"hsprof1"}]`))
+		case r.URL.Path == "/rest/file" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`[{".id":"*1","name":"hotspot/login.html","size":"9000","contents":"{{template \"styles\"}}"}]`))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer server.Close()
+
+	result, err := installerClient(t, server).InstallHotspotPortal(
+		context.Background(), "http://10.0.0.5/portal/router-login.html")
+	if err != nil {
+		t.Fatalf("InstallHotspotPortal: %v", err)
+	}
+	if result.Verified {
+		t.Errorf("a login page containing raw template syntax was reported as installed: %+v", result)
+	}
+	if !strings.Contains(strings.Join(result.Steps, " "), "not the panel redirect") {
+		t.Errorf("the steps do not name the real problem: %v", result.Steps)
+	}
+}
+
+func TestPortalPageLooksInstalled(t *testing.T) {
+	cases := []struct {
+		name     string
+		contents string
+		want     bool
+	}{
+		{"meta refresh redirect", `<meta http-equiv="refresh" content="0; url=http://10.0.0.252/">`, true},
+		{"script redirect", `window.location="http://10.0.0.252/portal/login";`, true},
+		{"stale template copy", `{{template "styles"}} <meta http-equiv="refresh">`, false},
+		{"built-in mikrotik page", `<form method="post" action="$(link-login-only)">`, false},
+		{"empty", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := portalPageLooksInstalled(tc.contents); got != tc.want {
+				t.Errorf("portalPageLooksInstalled(%q) = %v, want %v", tc.contents, got, tc.want)
 			}
 		})
 	}

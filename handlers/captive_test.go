@@ -327,13 +327,14 @@ func TestCaptivePortalGreetsAnOnlineClient(t *testing.T) {
 	}
 }
 
-// TestPortalTrialClaimRedirectsToTheHotspotLogin covers the free-trial grant:
-// a POST carrying trial=1 must send the guest's browser to the hotspot's own
-// login endpoint with empty credentials, which is what starts a RouterOS trial.
-// The API login refuses blank credentials ("username is missing"), so the grant
-// is a redirect, not a server-side call. link-login-only is present, so no
-// router dial is needed.
-func TestPortalTrialClaimRedirectsToTheHotspotLogin(t *testing.T) {
+// TestPortalTrialClaimPostsTheEmptyLoginForm covers the free-trial grant:
+// a POST carrying trial=1 must hand the guest's browser the same empty-
+// credential form the router's built-in login.html submits, targeted at the
+// hotspot's own login endpoint. A GET redirect is not enough: RouterOS answers
+// a GET with the login page itself, which bounced guests straight back to the
+// panel looking like a dead button. link-login-only is present, so no router
+// dial is needed.
+func TestPortalTrialClaimPostsTheEmptyLoginForm(t *testing.T) {
 	base, db := newCaptiveE2E(t, Config{})
 	if _, err := db.Routers().Create(context.Background(), database.Router{
 		Name: "cafe", Host: "192.168.88.1", Port: 8728,
@@ -353,36 +354,35 @@ func TestPortalTrialClaimRedirectsToTheHotspotLogin(t *testing.T) {
 		t.Fatalf("POST trial claim: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("trial claim status = %d, want a 303 redirect", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("trial claim status = %d, want the handoff page", resp.StatusCode)
 	}
-	loc := resp.Header.Get("Location")
-	if !strings.HasPrefix(loc, "http://192.168.88.1/login?") {
-		t.Fatalf("the trial claim did not redirect to the hotspot login URL: %q", loc)
-	}
-	parsed, err := url.Parse(loc)
+	page, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatalf("parse redirect: %v", err)
+		t.Fatalf("read handoff page: %v", err)
 	}
-	query := parsed.Query()
-	if values, ok := query["username"]; !ok || values[0] != "" {
-		t.Errorf("the trial redirect must carry an empty username, got %q", values)
-	}
-	if values, ok := query["password"]; !ok || values[0] != "" {
-		t.Errorf("the trial redirect must carry an empty password, got %q", values)
-	}
-	if got := query.Get("dst"); got != "http://example.com/" {
-		t.Errorf("dst = %q, want the guest's original destination", got)
+	body := string(page)
+	for _, want := range []string{
+		`method="post" action="http://192.168.88.1/login"`,
+		`<input type="hidden" name="username" value="">`,
+		`<input type="hidden" name="password" value="">`,
+		`name="dst" value="http://example.com/"`,
+		`document.getElementById("trial").submit()`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the handoff page is missing %q:\n%s", want, body)
+		}
 	}
 }
 
-// TestPortalTrialClaimOnBareRedirectReturnsTheGuestToThePanel covers the
-// operator's plain-redirect hotspot: no link-login-only in the request and no
-// hotspot-address on the profile, so the claim must fall back to the router's
-// own login page, send the guest back to the panel afterwards (an empty dst
-// strands the phone on the router's page and looks like a dead button), and
-// mirror the session so the returned page already shows the clock running.
-func TestPortalTrialClaimOnBareRedirectReturnsTheGuestToThePanel(t *testing.T) {
+// TestPortalTrialClaimOnBareRedirectPostsToTheRouterAndReturnsToThePanel
+// covers the operator's plain-redirect hotspot: no link-login-only in the
+// request and no hotspot-address on the profile, so the claim must fall back to
+// the router's own login endpoint, aim the form's dst back at this panel (an
+// empty dst strands the guest on the router's page and looks like a dead
+// button), and mirror the session so the returned page already shows the clock
+// running.
+func TestPortalTrialClaimOnBareRedirectPostsToTheRouterAndReturnsToThePanel(t *testing.T) {
 	base, db := newCaptiveE2E(t, Config{})
 	if _, err := db.Routers().Create(context.Background(), database.Router{
 		Name: "cafe", Host: "127.0.0.1", Port: 1,
@@ -397,29 +397,21 @@ func TestPortalTrialClaimOnBareRedirectReturnsTheGuestToThePanel(t *testing.T) {
 		t.Fatalf("POST bare-redirect trial claim: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("trial claim status = %d, want a 303 redirect", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("trial claim status = %d, want the handoff page", resp.StatusCode)
 	}
-	loc := resp.Header.Get("Location")
-	if !strings.HasPrefix(loc, "http://127.0.0.1/login?") {
-		t.Fatalf("trial claim did not fall back to the router's login page: %q", loc)
-	}
-	parsed, err := url.Parse(loc)
+	page, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatalf("parse redirect: %v", err)
+		t.Fatalf("read handoff page: %v", err)
 	}
-	query := parsed.Query()
-	if values, ok := query["username"]; !ok || values[0] != "" {
-		t.Errorf("the trial redirect must carry an empty username, got %q", values)
-	}
-	if values, ok := query["password"]; !ok || values[0] != "" {
-		t.Errorf("the trial redirect must carry an empty password, got %q", values)
-	}
-	if got := query.Get("dst"); got != base+"/" {
-		t.Errorf("dst = %q, want the guest returned to this panel at %q", got, base+"/")
-	}
-	if got := query.Get("ip"); got != "127.0.0.1" {
-		t.Errorf("ip = %q, want the claim to carry the client address", got)
+	body := string(page)
+	for _, want := range []string{
+		`method="post" action="http://127.0.0.1/login"`,
+		`name="dst" value="` + template.HTMLEscapeString(base+"/") + `"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the bare-redirect handoff is missing %q:\n%s", want, body)
+		}
 	}
 
 	// And the panel must know about the session the moment the guest lands

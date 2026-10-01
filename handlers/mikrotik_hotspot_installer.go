@@ -83,12 +83,14 @@ func (c *MikrotikClient) HotspotPortalState(ctx context.Context) (PortalInstallR
 
 // InstallHotspotPortal makes the device serve this controller's portal.
 //
-// It reads the device's own html-directory rather than assuming one, fetches
-// the redirect page into it, and then reads the file back. The read-back is the
-// point: /tool/fetch can report success while writing nothing useful (a wrong
-// path, a device that cannot reach the panel, a file that lands in RAM and is
-// lost on reboot), and an operator needs to see that rather than infer it from
-// a phone.
+// It reads the device's own html-directory rather than assuming one, REMOVES
+// any login page already sitting there, fetches the redirect page into it, and
+// then reads the file back. The removal is essential: /tool/fetch does not
+// overwrite an existing file, so without it an old broken login.html survives
+// the install and every guest keeps seeing it while the panel cheerfully
+// reports success. The read-back checks CONTENT, not just that some file
+// exists: "file present, size above zero" was exactly the false "verified" an
+// operator could not act on.
 func (c *MikrotikClient) InstallHotspotPortal(ctx context.Context, url string) (PortalInstallResult, error) {
 	url = strings.TrimSpace(url)
 	if url == "" {
@@ -104,6 +106,13 @@ func (c *MikrotikClient) InstallHotspotPortal(ctx context.Context, url string) (
 		HTMLDirectory: directory,
 		DestPath:      dest,
 		Steps:         []string{"This hotspot serves its pages from " + directory + "/"},
+	}
+
+	if removed, err := c.removeFileByName(ctx, dest); err != nil {
+		result.Steps = append(result.Steps, "Could not clear the old login page: "+err.Error())
+		return result, err
+	} else if removed {
+		result.Steps = append(result.Steps, "Removed the old "+dest+" first: /tool fetch never overwrites an existing file.")
 	}
 
 	// mode=http keeps the router from attempting TLS against a plain panel,
@@ -127,14 +136,56 @@ func (c *MikrotikClient) InstallHotspotPortal(ctx context.Context, url string) (
 		return result, nil
 	}
 	result.Size = parseRouterOSSize(row["size"])
-	result.Verified = result.Size > 0
-	if result.Verified {
-		result.Steps = append(result.Steps, "Verified "+dest+" ("+humanBytes(result.Size)+")")
-	} else {
+	if result.Size == 0 {
 		result.Steps = append(result.Steps,
 			"The file at "+dest+" is empty - the panel was probably unreachable from the router.")
+		return result, nil
 	}
+	// The old file was removed before the fetch, so anything sitting at dest
+	// now came from this fetch. Read-back of the content is a bonus check, not
+	// a gate: devices that do not return file contents over the API must not
+	// produce a false failure, while contents that still carry template syntax
+	// or lack the redirect are a hard, honest FAIL.
+	if contents := row["contents"]; contents != "" && !portalPageLooksInstalled(contents) {
+		result.Steps = append(result.Steps,
+			"The device fetched a page, but "+dest+" is not the panel redirect - guests may still see the broken or built-in login page.")
+		return result, nil
+	}
+	result.Verified = true
+	result.Steps = append(result.Steps, "Verified "+dest+" ("+humanBytes(result.Size)+") is the panel redirect page.")
 	return result, nil
+}
+
+// portalPageLooksInstalled decides whether a login.html read back from the
+// device is the panel redirect page rather than a stale or hand-pasted file.
+// Any response that still contains Go template syntax is by definition not
+// something the controller rendered, so it must never count as installed.
+func portalPageLooksInstalled(contents string) bool {
+	if strings.Contains(contents, "{{") {
+		return false
+	}
+	return strings.Contains(contents, "http-equiv") || strings.Contains(contents, "window.location")
+}
+
+// removeFileByName deletes a stored file if one is present. A missing file is
+// not an error - there is simply nothing to clear.
+func (c *MikrotikClient) removeFileByName(ctx context.Context, name string) (bool, error) {
+	reply, err := c.Run(ctx, fileMenu+"/print", "?name="+name)
+	if err != nil {
+		return false, nil
+	}
+	row := reply.First()
+	if row == nil {
+		return false, nil
+	}
+	id := strings.TrimSpace(row[".id"])
+	if id == "" {
+		return false, nil
+	}
+	if err := c.removeROSObject(ctx, fileMenu, id); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // hotspotHTMLDirectory reports where the device keeps its hotspot pages.
