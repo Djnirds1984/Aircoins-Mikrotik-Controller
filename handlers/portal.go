@@ -78,6 +78,9 @@ type portalPage struct {
 	// TrialEnabled reports that the hotspot server profile allows trial (free
 	// time) logins, so the captive page can offer the "Claim free time" button.
 	TrialEnabled bool
+	// TrialURL is the hotspot's own login endpoint offered as the free-time
+	// button's action when the redirect carried no $(link-login-only).
+	TrialURL string
 	// Branding is the operator's theme, header name, background and extra HTML,
 	// resolved from the PORTAL editor.
 	Branding portalBranding
@@ -115,7 +118,7 @@ func (h *Handler) PortalLogin(w http.ResponseWriter, r *http.Request) {
 		// device's own login URL) exist, so this is where a trial can actually
 		// be started. The check fails silent: an unreachable device only means
 		// the free-time button stays hidden.
-		view.TrialEnabled = h.portalTrialEnabled(ctx, request, router)
+		view.TrialEnabled, view.TrialURL = h.portalTrial(ctx, request, router)
 	}
 
 	h.renderPortal(w, r, http.StatusOK, view)

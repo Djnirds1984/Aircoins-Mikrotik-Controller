@@ -444,10 +444,12 @@ body.kiosk{
            the button posts to the device's own login URL, which is what starts
            a trial session. Otherwise the button is not dimmed or disabled - it
            is not rendered at all, because a dead control on a public kiosk is a
-           support call. The extra link-URL guard keeps the kiosk landing (which
-           carries no hotspot parameters) from ever showing an actionless form. */}}
+           support call. When the redirect carried no link-login-only (a plain jump
+           to the panel address), the action falls back to .TrialURL - the device's
+           own login endpoint read live from its hotspot profile - so the button
+           still has a working target; if that is empty too, the form is not shown. */}}
       {{if .TrialEnabled}}
-        {{$trial := .Portal.LinkLoginOnly}}{{if not $trial}}{{$trial = .Portal.LinkLogin}}{{end}}
+        {{$trial := .Portal.LinkLoginOnly}}{{if not $trial}}{{$trial = .Portal.LinkLogin}}{{end}}{{if not $trial}}{{$trial = .TrialURL}}{{end}}
         {{if $trial}}
         <form method="post" action="{{$trial}}" style="margin:0">
           {{if .Portal.LinkOrig}}<input type="hidden" name="dst" value="{{.Portal.LinkOrig}}">{{end}}

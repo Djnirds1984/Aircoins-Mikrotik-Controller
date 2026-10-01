@@ -24,6 +24,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"net/netip"
 	"strings"
 	"time"
 )
@@ -615,37 +616,77 @@ func (c *MikrotikClient) RemoveHotspotServerProfile(ctx context.Context, id stri
 // act on. Any real device failure is returned so the caller can decide to fail
 // silent instead of turning a welcome page into an error page.
 func (c *MikrotikClient) TrialEnabledOnServer(ctx context.Context, serverName string) (bool, error) {
+	enabled, _, err := c.HotspotTrial(ctx, serverName)
+	return enabled, err
+}
+
+// HotspotTrial reports whether the hotspot server a guest landed on uses a
+// profile whose login-by set includes "trial", and the login URL a guest should
+// POST to in order to start that trial.
+//
+// loginURL is derived from the profile's own hotspot-address as
+// http://<address>/login, so a kiosk that arrived on a plain redirect (a jump to
+// the panel address that carries no $(link-login-only)) can still offer a
+// working free-time button instead of hiding it. It is empty when the profile
+// advertises no usable address, in which case the caller has nothing to point the
+// button at and hides it - exactly as before. The server is named by serverName;
+// an empty value falls back to the device's first server (the common
+// single-hotspot case). A missing server, a missing profile or a profile without
+// a name is reported as "no trial" rather than an error, because none of them is
+// something a guest can act on. Any real device failure is returned so the caller
+// can decide to fail silent instead of turning a welcome page into an error page.
+func (c *MikrotikClient) HotspotTrial(ctx context.Context, serverName string) (enabled bool, loginURL string, err error) {
 	serverArgs := make([]string, 0, 1)
 	if name := strings.TrimSpace(serverName); name != "" {
 		serverArgs = append(serverArgs, "?name="+name)
 	}
 	serverReply, err := c.Run(ctx, hotspotServerMenu+"/print", serverArgs...)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	serverRow := serverReply.First()
 	if serverRow == nil {
-		return false, nil
+		return false, "", nil
 	}
 	profileName := strings.TrimSpace(hotspotServerFromRow(serverRow).Profile)
 	if profileName == "" {
-		return false, nil
+		return false, "", nil
 	}
 
 	profileReply, err := c.Run(ctx, hotspotServerProfileMenu+"/print", "?name="+profileName)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	profileRow := profileReply.First()
 	if profileRow == nil {
-		return false, nil
+		return false, "", nil
 	}
-	for _, method := range hotspotServerProfileFromRow(profileRow).LoginMethods() {
+	profile := hotspotServerProfileFromRow(profileRow)
+	loginURL = hotspotLoginURL(profile.HotspotAddress)
+	for _, method := range profile.LoginMethods() {
 		if strings.EqualFold(method, "trial") {
-			return true, nil
+			return true, loginURL, nil
 		}
 	}
-	return false, nil
+	return false, loginURL, nil
+}
+
+// hotspotLoginURL turns a server profile's hotspot-address into the RouterOS
+// login endpoint a trial POST targets. The field may list several comma-separated
+// addresses; the first real one wins (a trailing /prefix is ignored). It returns
+// "" when nothing parses as an address, so the caller hides the free-time button
+// rather than pointing it at a dead URL.
+func hotspotLoginURL(address string) string {
+	for _, candidate := range splitROSList(address) {
+		candidate = strings.TrimSpace(candidate)
+		if slash := strings.IndexByte(candidate, '/'); slash >= 0 {
+			candidate = candidate[:slash]
+		}
+		if addr, err := netip.ParseAddr(candidate); err == nil && addr.IsValid() {
+			return "http://" + addr.String() + "/login"
+		}
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------

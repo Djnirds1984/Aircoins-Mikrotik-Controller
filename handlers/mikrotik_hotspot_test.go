@@ -193,3 +193,23 @@ func TestStripUnknownParameter(t *testing.T) {
 		}
 	}
 }
+
+// TestHotspotLoginURL pins the free-time fallback: a profile's hotspot-address
+// becomes the RouterOS login endpoint a guest POSTs to. Several addresses take
+// the first; a /prefix is stripped; anything that is not a real address yields
+// "" so the caller hides the button rather than pointing it at a dead URL.
+func TestHotspotLoginURL(t *testing.T) {
+	cases := map[string]string{
+		"10.5.50.1":                 "http://10.5.50.1/login",
+		"10.5.50.1/24":              "http://10.5.50.1/login",
+		" 10.5.50.1 , 192.168.88.1 ": "http://10.5.50.1/login",
+		"":                          "",
+		"none":                      "",
+		"not-an-ip":                 "",
+	}
+	for address, want := range cases {
+		if got := hotspotLoginURL(address); got != want {
+			t.Errorf("hotspotLoginURL(%q) = %q, want %q", address, got, want)
+		}
+	}
+}

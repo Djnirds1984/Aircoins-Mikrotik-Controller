@@ -72,6 +72,13 @@ type captivePage struct {
 	// page hides the "Claim free time" button entirely, so a kiosk never offers
 	// a giveaway the device would refuse.
 	TrialEnabled bool
+	// TrialURL is the hotspot's own login endpoint used as the free-time button's
+	// form action when the guest arrived on a plain redirect that carried no
+	// $(link-login-only). It is read live from the server profile's
+	// hotspot-address, so a bare jump to the panel address still gets a working
+	// button; empty when the profile advertises no address, keeping the button
+	// hidden exactly as before.
+	TrialURL string
 }
 
 // portalTrialTimeout bounds the router round trip that reads the trial setting.
@@ -157,7 +164,7 @@ func (h *Handler) PortalIndex(w http.ResponseWriter, r *http.Request) {
 	if router, err := h.resolvePortalRouter(ctx, request); err == nil {
 		view.RouterName = router.Name
 		view.RouterKnown = true
-		view.TrialEnabled = h.portalTrialEnabled(ctx, request, router)
+		view.TrialEnabled, view.TrialURL = h.portalTrial(ctx, request, router)
 	} else {
 		h.log.Warn("portal welcome page has no router", "remote", clientIP(r), "error", err)
 	}
@@ -213,37 +220,44 @@ func (h *Handler) PortalProbe(w http.ResponseWriter, r *http.Request) {
 	if router, err := h.resolvePortalRouter(r.Context(), portalRequest{}); err == nil {
 		view.RouterName = router.Name
 		view.RouterKnown = true
-		view.TrialEnabled = h.portalTrialEnabled(r.Context(), portalRequest{}, router)
+		view.TrialEnabled, view.TrialURL = h.portalTrial(r.Context(), portalRequest{}, router)
 	}
 	h.render(w, r, http.StatusOK, "captive.html", view)
 }
 
-// portalTrialEnabled reports whether the hotspot server a portal request belongs
-// to uses a profile that allows trial (free time) logins.
+// portalTrial reports whether the hotspot server a portal request belongs to uses
+// a profile that allows trial (free time) logins, and the login URL a guest can
+// POST to in order to start one.
 //
 // It dials the device on a short leash and fails silent: an unreachable router
-// leaves the answer false, so the welcome page simply does not offer the
+// leaves the answer (false, "") so the welcome page simply does not offer the
 // free-time button rather than turning into an error page. This preserves the
 // guest-facing invariant that a device problem is never the guest's problem.
-func (h *Handler) portalTrialEnabled(ctx context.Context, request portalRequest, router database.Router) bool {
+//
+// The returned URL is the profile's own login endpoint. The template uses it only
+// when the redirect carried no hotspot login URL, so a plain jump to the panel
+// address still lands the button on a real target instead of dropping it.
+func (h *Handler) portalTrial(ctx context.Context, request portalRequest, router database.Router) (bool, string) {
 	dialCtx, cancel := context.WithTimeout(ctx, portalTrialTimeout)
-	defer cancel()
-
 	client, err := h.dialRouter(dialCtx, router)
+	// The dial context only governs the login handshake. Release it as soon as the
+	// connection is up so the profile reads below get their own full budget, rather
+	// than sharing (and silently exhausting) the dial's deadline.
+	cancel()
 	if err != nil {
-		return false
+		return false, ""
 	}
 	defer client.Close()
 
-	trialCtx, cancelTrial := context.WithTimeout(dialCtx, portalTrialTimeout)
+	trialCtx, cancelTrial := context.WithTimeout(ctx, portalTrialTimeout)
 	defer cancelTrial()
-	enabled, err := client.TrialEnabledOnServer(trialCtx, request.ServerName)
+	enabled, loginURL, err := client.HotspotTrial(trialCtx, request.ServerName)
 	if err != nil {
 		h.log.Debug("portal could not read the hotspot trial setting",
 			"router", router.Name, "error", err)
-		return false
+		return false, ""
 	}
-	return enabled
+	return enabled, loginURL
 }
 
 // captivePageFromPortal converts a portalPage (used by the full-page renderer
@@ -264,6 +278,7 @@ func captivePageFromPortal(p *portalPage) *captivePage {
 		ShowPassword: p.ShowPassword,
 		FallbackLink: p.FallbackLink,
 		TrialEnabled: p.TrialEnabled,
+		TrialURL:     p.TrialURL,
 		LoginURL:     portalLoginPath,
 	}
 	if p.Success {

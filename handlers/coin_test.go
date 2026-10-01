@@ -738,3 +738,34 @@ func TestKioskClaimFreeTimeIsConditionalOnTrial(t *testing.T) {
 		t.Error("the free-time button is shown even though the profile has no trial login")
 	}
 }
+
+// TestKioskClaimFreeTimeFallsBackToProfileLoginURL covers the plain-redirect
+// kiosk: a guest that joins the SSID and is jumped to the panel address arrives
+// with NO hotspot query string, so Portal.LinkLoginOnly/LinkLogin are empty. The
+// button must still render when the profile allows trial, posting to .TrialURL
+// (the device's own login endpoint read live from its profile), and must stay
+// hidden when no URL resolves at all so the kiosk never shows an actionless form.
+func TestKioskClaimFreeTimeFallsBackToProfileLoginURL(t *testing.T) {
+	kiosk := func(trial bool, trialURL string) *captivePage {
+		return &captivePage{
+			page:         samplePage("Wi-Fi sign in", ""),
+			RouterName:   "OrangePi-Lab",
+			RouterKnown:  true,
+			TrialEnabled: trial,
+			TrialURL:     trialURL,
+		}
+	}
+
+	withFallback := renderPage(t, "captive.html", kiosk(true, "http://10.0.0.1/login"))
+	if !strings.Contains(withFallback, "Claim free time") {
+		t.Error("free-time button missing on a plain-redirect kiosk whose profile allows trial")
+	}
+	if !strings.Contains(withFallback, `action="http://10.0.0.1/login"`) {
+		t.Error("free-time button does not post to the profile-derived login URL")
+	}
+
+	withNoURL := renderPage(t, "captive.html", kiosk(true, ""))
+	if strings.Contains(withNoURL, "Claim free time") {
+		t.Error("free-time button shown with no login URL to post to")
+	}
+}
