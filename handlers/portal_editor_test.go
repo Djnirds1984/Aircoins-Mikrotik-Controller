@@ -10,6 +10,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"net/textproto"
 	"net/url"
 	"strings"
@@ -23,6 +24,44 @@ import (
 // prove the routes survive the StripPrefix mount.
 func editorConfig() Config {
 	return Config{AdminPath: "/admin", PortalName: "Aircoins Hotspot", Version: "test"}
+}
+
+// TestPortalInstallFetchURL pins how the one-click installer resolves the address
+// routers download the guest page from. The detected request host is often one
+// the router cannot reach, so an operator override must win, and only absolute
+// http(s) may be accepted.
+func TestPortalInstallFetchURL(t *testing.T) {
+	installForm := func(values url.Values) *http.Request {
+		r := httptest.NewRequest("POST", "/admin/portal-editor/install-router-page",
+			bytes.NewReader([]byte(values.Encode())))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		return r
+	}
+
+	// A bare host gets the redirect-page path appended so the operator can type
+	// just the router-reachable address.
+	got, err := portalInstallFetchURL(installForm(url.Values{"fetch_url": {"http://10.0.0.252"}}))
+	if err != nil {
+		t.Fatalf("bare host override: %v", err)
+	}
+	if got != "http://10.0.0.252"+portalRouterLoginPath {
+		t.Errorf("bare host override = %q, want the redirect page appended", got)
+	}
+
+	// A full URL is kept exactly as typed.
+	want := "http://10.0.0.252" + portalRouterLoginPath
+	got, err = portalInstallFetchURL(installForm(url.Values{"fetch_url": {want}}))
+	if err != nil || got != want {
+		t.Errorf("full override = %q, err %v; want %q", got, err, want)
+	}
+
+	// A scheme-less address or a non-http scheme is rejected rather than handed
+	// to the router as a fetch target.
+	for _, bad := range []string{"10.0.0.252", "ftp://10.0.0.252/x"} {
+		if _, err := portalInstallFetchURL(installForm(url.Values{"fetch_url": {bad}})); err == nil {
+			t.Errorf("%q was accepted as a fetch URL", bad)
+		}
+	}
 }
 
 // TestCaptiveProbePathsShowThePortal pins the answer to a support report: a

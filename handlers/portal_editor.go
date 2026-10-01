@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -402,15 +403,22 @@ func (h *Handler) PortalRouterInstall(w http.ResponseWriter, r *http.Request) {
 	back := h.cfg.AdminPath + portalEditorPath
 	ctx := r.Context()
 
-	// The router reaches the panel over the address this request came in on.
-	// Without it the fetch URL would be empty and every router would fail.
-	base := portalBaseURL(r)
-	if base == "" {
-		h.flashAndRedirect(w, r, back, "err",
-			"The address of this panel could not be determined from the request, so the routers cannot be pointed at it. Open the panel through its real address and try again.")
+	// The router downloads the page over the address resolved here. It defaults
+	// to the address this request came in on, but that is frequently one only the
+	// operator's browser can reach (a ZeroTier address or hostname) which the
+	// router cannot route to - the fetch then fails with "Host is unreachable".
+	// The form field lets the operator type the panel's LAN address the router
+	// can actually reach instead.
+	fetchURL, err := portalInstallFetchURL(r)
+	if err != nil {
+		h.flashAndRedirect(w, r, back, "err", err.Error())
 		return
 	}
-	fetchURL := base + portalRouterLoginPath
+	if fetchURL == "" {
+		h.flashAndRedirect(w, r, back, "err",
+			"The address of this panel could not be determined from the request, so the routers cannot be pointed at it. Open the panel by its real address, or type a router-reachable address into the field and try again.")
+		return
+	}
 
 	routers, err := h.db.Routers().List(ctx)
 	if err != nil {
@@ -455,8 +463,32 @@ func (h *Handler) PortalRouterInstall(w http.ResponseWriter, r *http.Request) {
 		h.flashAndRedirect(w, r, back, "warn",
 			"Installed on "+strconv.Itoa(len(installed))+" router(s); problems: "+strings.Join(problems, "; "))
 	default:
-		h.flashAndRedirect(w, r, back, "err", "Could not install the portal page: "+strings.Join(problems, "; "))
+		h.flashAndRedirect(w, r, back, "err", "Could not install the portal page from "+fetchURL+": "+strings.Join(problems, "; ")+
+			". Check that this address is reachable from the router - use the panel's LAN IP (for example http://10.0.0.252) rather than the address you browse the panel with - and that the hotspot walled-garden allows it.")
 	}
+}
+
+// portalInstallFetchURL resolves the URL the routers should download the guest
+// login page from. It honours an operator-entered override (the "fetch_url"
+// field) so an address the router can actually reach can be used, and otherwise
+// falls back to the address this request arrived on. Only an absolute http(s)
+// URL is accepted; a bare host gets the redirect-page path appended.
+func portalInstallFetchURL(r *http.Request) (string, error) {
+	if raw := strings.TrimSpace(r.FormValue("fetch_url")); raw != "" {
+		parsed, err := url.Parse(raw)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return "", errors.New("The panel address must be a full http:// or https:// address the router can reach, for example http://10.0.0.252.")
+		}
+		if parsed.Path == "" || parsed.Path == "/" {
+			parsed.Path = portalRouterLoginPath
+		}
+		return parsed.String(), nil
+	}
+	base := portalBaseURL(r)
+	if base == "" {
+		return "", nil
+	}
+	return base + portalRouterLoginPath, nil
 }
 
 // PortalEditorBackground accepts a JPEG or PNG upload and stores it as the
