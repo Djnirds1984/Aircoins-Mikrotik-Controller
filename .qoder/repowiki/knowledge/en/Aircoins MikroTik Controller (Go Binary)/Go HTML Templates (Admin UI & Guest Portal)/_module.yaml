@@ -1,9 +1,0 @@
-schema_version: 1
-module_path: templates
-title: Go HTML Templates (Admin UI & Guest Portal)
-scope:
-    - templates/
-source_files: []
-depends_on: []
-related_to:
-    - path: handlers

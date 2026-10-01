@@ -1,9 +1,0 @@
-schema_version: 1
-module_path: database
-title: SQLite Persistence Layer for Router Inventory, Sessions & Vouchers
-scope:
-    - database/
-source_files: []
-depends_on: []
-related_to:
-    - path: handlers

@@ -1,1 +1,0 @@
-Go standard library `database/sql` with the pure-Go `modernc.org/sqlite` driver (no cgo/libsqlite3), AES-GCM via `crypto/cipher` for at-rest credential encryption, and RFC3339 text timestamps for sortable time columns.

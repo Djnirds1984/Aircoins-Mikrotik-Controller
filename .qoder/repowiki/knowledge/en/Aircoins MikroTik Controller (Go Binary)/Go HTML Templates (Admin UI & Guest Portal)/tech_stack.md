@@ -1,1 +1,0 @@
-Go `html/template` package with named `define`/`template` blocks; no client-side framework — all interactivity is vanilla JS inside `<script>` tags embedded directly in the templates.

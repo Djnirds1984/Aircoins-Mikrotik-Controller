@@ -1,1 +1,0 @@
-Standard library `net/http` ServeMux with path parameters; `html/template` for server-rendered pages; `log/slog` structured logging; RouterOS communication over both the legacy binary API and the RouterOS v7 REST API (JSON over HTTP/HTTPS).

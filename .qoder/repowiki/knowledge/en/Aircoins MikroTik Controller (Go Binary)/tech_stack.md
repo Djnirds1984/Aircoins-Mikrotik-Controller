@@ -1,1 +1,0 @@
-Go standard library `net/http`, `log/slog`, `html/template`, `embed`; SQLite via the child `database` package; templating via the child `templates` package embedded at build time.

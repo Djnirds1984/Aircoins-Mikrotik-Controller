@@ -1,6 +1,0 @@
-- Reusable UI fragments (CSS, nav bar, flash messages, CSRF token, voucher table rows, footer) are declared as named `{{define ...}}` blocks in `partials.html` and included by other templates via `{{template "..." .}}`.
-- Every mutating POST form embeds `{{template "csrf" .}}` so a hidden `csrf_token` field is submitted alongside the request.
-- Page-level styles are kept as an inline `<style>` block scoped to the specific page, while global layout/theme lives in `partials.html`'s `styles` block.
-- Interactive scripts are written as IIFEs placed at the bottom of the page template rather than in external `.js` files, keeping guest-facing pages fully self-contained.
-- Data passed to client-side code uses `data-*` attributes on DOM elements (e.g. `data-subject`, `data-enabled`, `data-seconds`, `data-cents`) instead of inline JavaScript variables.
-- User-visible text is formatted through helper functions exposed by the renderer such as `icon`, `money`, `humanCount`, `timeLabel`, `sinceLabel`, and `statusClass` rather than being computed in the template.
