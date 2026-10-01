@@ -41,7 +41,7 @@ func TestGuestChainHasNoFourOhFours(t *testing.T) {
 	}
 
 	t.Run("router-login page is the clean handoff", func(t *testing.T) {
-	 resp, err := client.Get(base + portalRouterLoginPath)
+		resp, err := client.Get(base + portalRouterLoginPath)
 		if err != nil {
 			t.Fatalf("GET %s: %v", portalRouterLoginPath, err)
 		}
