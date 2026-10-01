@@ -200,12 +200,12 @@ func TestStripUnknownParameter(t *testing.T) {
 // "" so the caller hides the button rather than pointing it at a dead URL.
 func TestHotspotLoginURL(t *testing.T) {
 	cases := map[string]string{
-		"10.5.50.1":                 "http://10.5.50.1/login",
-		"10.5.50.1/24":              "http://10.5.50.1/login",
+		"10.5.50.1":                  "http://10.5.50.1/login",
+		"10.5.50.1/24":               "http://10.5.50.1/login",
 		" 10.5.50.1 , 192.168.88.1 ": "http://10.5.50.1/login",
-		"":                          "",
-		"none":                      "",
-		"not-an-ip":                 "",
+		"":                           "",
+		"none":                       "",
+		"not-an-ip":                  "",
 	}
 	for address, want := range cases {
 		if got := hotspotLoginURL(address); got != want {
