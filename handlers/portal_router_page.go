@@ -29,7 +29,16 @@ const portalRouterLoginPath = "/portal/router-login.html"
 //
 // The page is a plain meta refresh rather than a script so it works on the
 // oldest phones a hotspot sees.
+//
+// The marker comment identifies this exact document. The panel reads the file
+// back off the router after an install and looks for it, so "installed and
+// verified" means the handoff page is really there - not merely that some file
+// with that name exists, which is how a stale broken copy once passed for a
+// success.
+const portalHandoffMarker = "aircoins:portal-handoff"
+
 const portalRouterLoginTemplate = `<!DOCTYPE html>
+<!-- ` + portalHandoffMarker + ` -->
 <html lang="en">
 <head>
 <meta charset="utf-8">

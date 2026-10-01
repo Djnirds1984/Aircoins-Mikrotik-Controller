@@ -20,6 +20,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/djnirds1984/aircoins-mikrotik-controller/database"
@@ -155,6 +156,11 @@ type Handler struct {
 	// portalFull serves the operator's own portal document when the PORTAL
 	// editor is in full-page mode. It caches the compiled template.
 	portalFull *portalFullRenderer
+	// portalHealMu guards portalHealAt, which rate-limits the automatic
+	// login-page repair each router gets while guests keep landing on the
+	// portal. See ensureRouterHandoff.
+	portalHealMu sync.Mutex
+	portalHealAt map[int64]time.Time
 }
 
 // New builds a Handler. The template set must already be parsed.
@@ -240,11 +246,18 @@ func (h *Handler) Routes() http.Handler {
 	// explicitly asked for the old layout.
 	if h.cfg.DashboardAtRoot {
 		mux.HandleFunc("GET /{$}", h.Dashboard)
-		mux.HandleFunc("GET /portal", h.PortalIndex)
-		mux.HandleFunc("GET /portal/", h.PortalIndex)
 	} else {
 		mux.HandleFunc("GET /{$}", h.PortalIndex)
 	}
+	// The portal answers at /portal and /portal/ under BOTH layouts. A hotspot
+	// configured to redirect to "http://<panel>/portal" is a guest-facing URL,
+	// and 404ing there looks exactly like a dead panel.
+	//
+	// The trailing-slash form must use the exact-match {$} suffix: a bare
+	// "/portal/" pattern is a SUBTREE, and would silently swallow every deeper
+	// /portal route (session, background, status) that lives on other muxes.
+	mux.HandleFunc("GET /portal", h.PortalIndex)
+	mux.HandleFunc("GET /portal/{$}", h.PortalIndex)
 
 	// The operating-system captive probes are answered with the portal rather
 	// than being left to the guarded catch-all below. Registering them here, and

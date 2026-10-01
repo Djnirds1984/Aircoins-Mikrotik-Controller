@@ -165,6 +165,10 @@ func (h *Handler) PortalIndex(w http.ResponseWriter, r *http.Request) {
 		view.RouterName = router.Name
 		view.RouterKnown = true
 		view.TrialEnabled, view.TrialURL = h.portalTrial(ctx, request, router)
+		// A guest standing on this page proves this router's hot path is in
+		// use, so it also gets a rate-limited chance to notice - and fix - a
+		// broken login page on the device itself. See portal_heal.go.
+		h.ensureRouterHandoff(r, router)
 	} else {
 		h.log.Warn("portal welcome page has no router", "remote", clientIP(r), "error", err)
 	}

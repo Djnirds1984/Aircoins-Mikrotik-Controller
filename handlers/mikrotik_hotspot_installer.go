@@ -51,7 +51,9 @@ func hotspotLoginPath(directory string) string {
 //
 // It is a read, so an operator can answer "is the redirect still installed?"
 // without changing anything. This is the check that turns "it worked once" into
-// a fact.
+// a fact. It reads CONTENT, not just a file size: a stale hand-pasted page is
+// non-empty too, and "some file sits here" once passed a broken portal for a
+// working one. The self-heal in portal_heal.go decides from this answer.
 func (c *MikrotikClient) HotspotPortalState(ctx context.Context) (PortalInstallResult, error) {
 	result := PortalInstallResult{}
 
@@ -73,11 +75,23 @@ func (c *MikrotikClient) HotspotPortalState(ctx context.Context) (PortalInstallR
 		return result, nil
 	}
 	result.Size = parseRouterOSSize(row["size"])
-	result.Verified = result.Size > 0
-	if result.Verified {
+	if result.Size == 0 {
 		result.Steps = append(result.Steps,
-			"Found "+result.DestPath+" ("+humanBytes(result.Size)+").")
+			result.DestPath+" exists but is empty: guests get a blank page or a 404.")
+		return result, nil
 	}
+	// Same trust rule as the install: contents the API does not return are not
+	// evidence of damage, but contents that DO come back and still carry Go
+	// template syntax or lack any redirect are provably not the handoff page.
+	contents := row["contents"]
+	if contents != "" && !portalPageLooksInstalled(contents) {
+		result.Steps = append(result.Steps,
+			result.DestPath+" is not the panel handoff page - guests see a broken or built-in login.")
+		return result, nil
+	}
+	result.Verified = true
+	result.Steps = append(result.Steps,
+		"Found "+result.DestPath+" ("+humanBytes(result.Size)+") serving the panel handoff.")
 	return result, nil
 }
 
@@ -158,11 +172,17 @@ func (c *MikrotikClient) InstallHotspotPortal(ctx context.Context, url string) (
 
 // portalPageLooksInstalled decides whether a login.html read back from the
 // device is the panel redirect page rather than a stale or hand-pasted file.
-// Any response that still contains Go template syntax is by definition not
-// something the controller rendered, so it must never count as installed.
+// The handoff marker is the positive test; any response that still carries Go
+// template syntax is by definition not something the controller rendered, so it
+// must never count as installed. A redirect page installed before the marker
+// existed still passes on its structural markers, so an honest check never
+// forces needless rework.
 func portalPageLooksInstalled(contents string) bool {
 	if strings.Contains(contents, "{{") {
 		return false
+	}
+	if strings.Contains(contents, portalHandoffMarker) {
+		return true
 	}
 	return strings.Contains(contents, "http-equiv") || strings.Contains(contents, "window.location")
 }
