@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: handlers
+title: HTTP Handlers & Admin Dashboard
+scope:
+    - handlers/
+source_files: []
+depends_on: []
+related_to:
+    - path: database
+    - path: templates

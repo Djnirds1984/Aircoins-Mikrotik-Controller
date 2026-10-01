@@ -1,0 +1,1 @@
+Go HTTP layer for the Aircoins MikroTik controller, exposing the operator dashboard, captive portal, voucher engine, piso-wifi coin slot, and a RouterOS v7-compatible REST API.

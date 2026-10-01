@@ -1,0 +1,6 @@
+- Each domain entity lives in its own `<entity>.go` file containing the struct, DDL constant(s), indexes, and a `*Store` type with `List/Get/Create/Update/Delete` methods plus any domain queries.
+- Sensitive fields (router passwords) are never written/read directly — they go through `db.box.Seal` on write and `db.box.Open` inside the entity's `scan` helper on read.
+- Boolean columns are persisted as INTEGER 0/1 using a local `boolToInt` helper, and scanned back into Go bools.
+- Timestamps are formatted/parsed through the shared `stamp(now())` / `parseStamp` helpers so every row uses the same RFC3339 layout.
+- New schema changes are added by appending an entry to the `migrations` slice with an incremented version number rather than editing existing DDL blocks.
+- Database errors are wrapped with `wrapDBError` and unique-constraint violations are surfaced as user-facing messages via `isUniqueViolation`.

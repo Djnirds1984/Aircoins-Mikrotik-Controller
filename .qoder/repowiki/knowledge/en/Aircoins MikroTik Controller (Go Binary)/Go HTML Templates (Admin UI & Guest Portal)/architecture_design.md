@@ -1,0 +1,8 @@
+All files are Go `html/template` templates rendered server-side into full HTML documents.
+
+- `partials.html` is the central layout/asset bundle: it defines named blocks `styles`, `portalStarter`, `coinTab`, `coinScript`, `flash`, `csrf`, `nav`, `voucherRows`, and `footer`. Every page template includes it via `{{template "styles" .}}` and composes the chrome with `{{template "nav" .}}` / `{{template "footer" .}}` / `{{template "flash" .}}`.
+- Admin pages (`dashboard.html`, `routers.html`, `router.html`, `network.html`, `tools.html`, `vouchers.html`, `rates.html`, `sessions.html`, `settings.html`, `status.html`) share the same topbar nav defined in `partials.html` and use the card/table/badge/grid CSS classes from its embedded `<style>` block.
+- Guest-facing pages (`captive.html`, `captive_portal.html`, `login.html`, `portal.html`, `portal_editor.html`) render the MikroTik captive portal; `portalStarter` provides a ready-to-edit starter HTML that posts to the router's login action, and `coinTab` + `coinScript` provide the self-contained coin-slot modal whose JS polls `/api/coin-status` without any external assets — required because guests behind the portal have no internet.
+- CSRF protection is injected per form via `{{template "csrf" .}}` which renders a hidden `csrf_token` field.
+- Page-specific inline `<script>` blocks live at the bottom of each page template (e.g. the traffic graph in `dashboard.html`), while shared behavior stays in `partials.html`.
+- There is no build step or asset pipeline: CSS variables (`--bg`, `--panel`, `--accent`, `--accent-2`, `--radius`) in `partials.html` define the dark theme used across every page.

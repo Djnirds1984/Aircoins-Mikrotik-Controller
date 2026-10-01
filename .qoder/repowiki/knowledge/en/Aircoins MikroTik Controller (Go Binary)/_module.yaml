@@ -1,0 +1,23 @@
+schema_version: 1
+module_path: ""
+title: Aircoins MikroTik Controller (Go Binary)
+scope:
+    - .gitattributes
+    - .gitignore
+    - INSTALLATION.md
+    - README.md
+    - config.go
+    - config_test.go
+    - go.mod
+    - go.sum
+    - install.sh
+    - main.go
+    - netstart.ps1
+    - reset_demo.ps1
+    - run_demo.ps1
+    - smoke_network.ps1
+    - start_demo.sh
+    - sweeper.go
+source_files: []
+depends_on: []
+related_to: []

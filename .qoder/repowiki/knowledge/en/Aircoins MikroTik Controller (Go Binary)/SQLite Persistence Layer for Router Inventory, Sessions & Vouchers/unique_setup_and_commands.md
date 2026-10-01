@@ -1,0 +1,1 @@
+Tests use `:memory:` databases (see `*_test.go` files) and can override the master key via the `AIRCOINS_SECRET_KEY` environment variable; production requires either `SecretKeyPath` or `SecretKey` on `Config` because a missing master key causes `Open` to fail.

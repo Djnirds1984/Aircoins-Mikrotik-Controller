@@ -1,0 +1,1 @@
+Go `html/template` views for the MikroTik hotspot controller's admin dashboard, captive portal, voucher/rate/session pages, and a shared partials stylesheet.

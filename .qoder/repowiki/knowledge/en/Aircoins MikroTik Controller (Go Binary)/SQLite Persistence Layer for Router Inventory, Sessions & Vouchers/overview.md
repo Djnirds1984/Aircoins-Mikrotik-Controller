@@ -1,0 +1,1 @@
+Pure-Go SQLite persistence package providing versioned schema migrations, encrypted router credentials, and typed stores for routers, sessions, vouchers, coin credits, rates, portal settings, and admin auth.

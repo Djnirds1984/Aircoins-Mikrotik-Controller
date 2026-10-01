@@ -1,0 +1,3 @@
+- Configuration is read exclusively from environment variables through typed helpers (`envOr`, `envBool`, `envInt`, `envDuration`) rather than flags or files.
+- Errors from child packages are wrapped with `fmt.Errorf("...: %w", err)` at the composition boundary in `main.go`.
+- Background goroutines accept a `done <-chan struct{}` and a `context.Context` with timeout, and log via the shared `*slog.Logger` instead of printing directly.

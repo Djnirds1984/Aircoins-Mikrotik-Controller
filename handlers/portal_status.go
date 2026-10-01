@@ -17,42 +17,6 @@ import (
 // would break anyone using it to check the portal from a script.
 const portalStatusPagePath = "/portal/session"
 
-// portalStatusPage backs the session page a guest opens to watch the clock on
-// their own connection.
-type portalStatusPage struct {
-	page
-	// Branding is the operator's theme, background and header name, so the page
-	// looks like the rest of the portal.
-	Branding portalBranding
-	// Online reports whether this address currently holds a session.
-	Online bool
-	// User, MAC, IP and RouterName identify the connection.
-	User       string
-	MAC        string
-	IP         string
-	RouterName string
-	// ConnectedAt is when the session started, for a human reader.
-	ConnectedAt string
-	// ElapsedSeconds is how long the session has been running. The page ticks it
-	// in the browser, so this only has to be right when the page is served.
-	ElapsedSeconds int
-	// Elapsed is ElapsedSeconds already split for display.
-	Elapsed countdownParts
-	// HasAllowance and RemainingSeconds describe a prepaid voucher's remaining
-	// time, when the session was created from one. They are separate from the
-	// elapsed clock: a customer cares about how long they have left.
-	HasAllowance     bool
-	RemainingSeconds int
-	// Remaining is RemainingSeconds already split for display.
-	Remaining countdownParts
-	ExpiresAt string
-	// LoginURL and AdminPath link onwards.
-	LoginURL  string
-	AdminPath string
-	// Coin is the state of the "Insert coin" tab on the sign-in page.
-	Coin coinPortal
-}
-
 // coinPortalFor resolves everything the guest's coin tab needs for one page
 // render.
 //
@@ -107,42 +71,10 @@ func (h *Handler) coinPortalFor(r *http.Request, request portalRequest) coinPort
 	return coin
 }
 
-// PortalStatusPage serves the guest's own session view.
+// PortalStatusPage redirects guests to the captive portal root, which already
+// displays session status (online state, clock, remaining time).
 func (h *Handler) PortalStatusPage(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	view := &portalStatusPage{
-		page:      page{Title: "Your session", Nav: ""},
-		Branding:  h.portalBrandingFor(ctx),
-		LoginURL:  portalLoginPath,
-		AdminPath: h.cfg.AdminPath,
-	}
-	if view.Branding.HeaderName == "" {
-		view.Branding.HeaderName = h.cfg.PortalName
-	}
-
-	if session, ok := h.portalClientSession(ctx, r); ok {
-		view.Online = true
-		view.User = session.Username
-		view.MAC = database.FormatMAC(session.MACAddress)
-		view.IP = session.Address
-		view.RouterName = session.RouterName
-		view.ConnectedAt = session.StartedAt.Local().Format("02 Jan 15:04:05")
-		// Counted from StartedAt rather than from Session.Duration(), which ends
-		// at LastSeenAt: that value only advances when a device poll lands, so a
-		// clock built on it would visibly stutter between polls.
-		view.ElapsedSeconds = secondsSince(session.StartedAt)
-		view.Elapsed = splitCountdown(view.ElapsedSeconds)
-		// A voucher-created session knows its own allowance; a username login
-		// has none, and that is not an error.
-		if voucher, err := h.db.Vouchers().FindByCode(ctx, session.Username); err == nil {
-			view.HasAllowance = true
-			view.ExpiresAt = voucher.ExpiresAt.Local().Format("02 Jan 15:04:05")
-			view.RemainingSeconds = secondsUntil(voucher.ExpiresAt)
-			view.Remaining = splitCountdown(view.RemainingSeconds)
-		}
-	}
-
-	h.render(w, r, http.StatusOK, "status.html", view)
+	http.Redirect(w, r, "/", http.StatusFound)
 }
 
 // secondsSince is how long ago t was, floored to whole seconds and clamped at

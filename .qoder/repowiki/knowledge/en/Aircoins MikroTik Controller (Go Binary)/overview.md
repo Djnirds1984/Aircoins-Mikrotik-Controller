@@ -1,0 +1,1 @@
+Single-process Go binary that wires the SQLite persistence layer, HTTP handlers, and embedded HTML templates into a MikroTik hotspot controller with admin panel, captive portal, voucher engine, and piso-wifi coin slot.
