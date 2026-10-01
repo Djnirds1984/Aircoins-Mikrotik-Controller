@@ -364,8 +364,11 @@ func (h *Handler) adminRoutes() *http.ServeMux {
 	// VLAN interfaces (/interface/vlan) - create only.
 	mux.HandleFunc("POST /network/{id}/vlans", h.VLANCreate)
 
-	// Session history.
-	mux.HandleFunc("GET /sessions", h.SessionsList)
+	// Devices: fleet-wide client inventory with live DHCP/hotspot enrichment.
+	mux.HandleFunc("GET /devices", h.DevicesList)
+	mux.HandleFunc("POST /devices", h.DeviceCreate)
+	mux.HandleFunc("POST /devices/{id}", h.DeviceUpdate)
+	mux.HandleFunc("POST /devices/{id}/delete", h.DeviceDelete)
 
 	// Host maintenance tools.
 	mux.HandleFunc("GET /tools", h.Tools)

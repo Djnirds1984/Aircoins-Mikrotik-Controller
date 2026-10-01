@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · {{.PortalName}}</title>
+{{template "styles" .}}
+</head>
+<body>
+{{template "nav" .}}
+<main class="wrap">
+  {{template "flash" .}}
+
+  <div class="page-head">
+    <div>
+      <h1>Devices</h1>
+      <p class="sub">{{humanCount .Total}} device(s) discovered · {{humanCount .Connected}} connected ·
+        {{humanCount .Saved}} saved</p>
+    </div>
+    <div class="actions">
+      <a class="btn" href="{{.AdminPath}}/">{{icon "gauge"}} Dashboard</a>
+      <a class="btn" href="{{.AdminPath}}/routers">{{icon "router"}} Routers</a>
+    </div>
+  </div>
+
+  {{if .Warnings}}
+  <section class="card" style="margin-bottom:16px">
+    <h2>{{icon "alert-triangle"}} Some routers could not be read</h2>
+    <p class="hint">Saved devices are still listed; live hostname, address and session time come from the
+      router and need a working connection.</p>
+    <ul class="muted" style="margin:8px 0 0; padding-left:20px">
+      {{range .Warnings}}<li>{{.}}</li>{{end}}
+    </ul>
+  </section>
+  {{end}}
+
+  <section class="grid cols-2">
+    <div class="card">
+      <h2>{{icon "plus"}} Add a device</h2>
+      <p class="hint">Save a client to the local inventory so it keeps its name and notes even when it is
+        offline. The MAC address is what ties the record to the router's live data.</p>
+      <form method="post" action="{{.AdminPath}}/devices">
+        {{template "csrf" .}}
+        <div class="form-grid">
+          <div class="field">
+            <label for="add-router">Router</label>
+            <select id="add-router" name="router_id" required>
+              <option value="">Choose a router…</option>
+              {{range .Routers}}
+              <option value="{{.ID}}"{{if eq $.Form.RouterID .ID}} selected{{end}}>{{.Name}}</option>
+              {{end}}
+            </select>
+            {{with .Form.Errors.router_id}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="add-mac">MAC address</label>
+            <input id="add-mac" name="mac" value="{{.Form.MAC}}" placeholder="AA:BB:CC:DD:EE:FF" required>
+            {{with .Form.Errors.mac}}<span class="error">{{.}}</span>{{end}}
+          </div>
+          <div class="field">
+            <label for="add-name">Name (optional)</label>
+            <input id="add-name" name="name" value="{{.Form.Name}}" placeholder="Front desk tablet">
+          </div>
+          <div class="field">
+            <label for="add-notes">Notes (optional)</label>
+            <input id="add-notes" name="notes" value="{{.Form.Notes}}" placeholder="Installed 2026-10-01">
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn primary" type="submit">{{icon "save"}} Save device</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>{{icon "filter"}} Filters</h2>
+      <p class="hint">Narrow the fleet to one router, or search by name, hostname, IP or MAC.</p>
+      <form method="get" action="{{.AdminPath}}/devices">
+        <div class="form-grid">
+          <div class="field">
+            <label for="filter-router">Router</label>
+            <select id="filter-router" name="router">
+              <option value="">All routers</option>
+              {{range .Routers}}
+              <option value="{{.ID}}"{{if eq $.Filter.RouterID .ID}} selected{{end}}>{{.Name}}</option>
+              {{end}}
+            </select>
+          </div>
+          <div class="field">
+            <label for="filter-q">Search</label>
+            <input id="filter-q" name="q" value="{{.Filter.Query}}" placeholder="name, 192.168.88.10, AA:BB:CC">
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn primary" type="submit">{{icon "filter"}} Apply filters</button>
+          <a class="btn" href="{{.AdminPath}}/devices">{{icon "x"}} Clear</a>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <h2>{{icon "monitor"}} Discovered devices</h2>
+    {{if .Devices}}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>{{icon "monitor" "sm"}} Device</th>
+            <th>{{icon "link" "sm"}} IP address</th>
+            <th>{{icon "wifi" "sm"}} MAC</th>
+            <th>{{icon "clock" "sm"}} Session time left</th>
+            <th>{{icon "router" "sm"}} Router</th>
+            <th>{{icon "signal" "sm"}} Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+        {{range .Devices}}
+          <tr>
+            <td>
+              <strong>{{.DisplayName}}</strong>
+              {{with .Hostname}}<div class="muted" style="font-size:.78rem">{{.}}</div>{{end}}
+              {{with .Notes}}<div class="muted" style="font-size:.78rem">{{.}}</div>{{end}}
+            </td>
+            <td class="mono">{{if .Address}}{{.Address}}{{else}}—{{end}}</td>
+            <td class="mono">{{if .MAC}}{{.MACAddress}}{{else}}—{{end}}</td>
+            <td class="nowrap">
+              {{if .SessionTimeLeft}}{{.SessionTimeLeft}}{{else}}—{{end}}
+              {{with .Uptime}}<div class="muted" style="font-size:.76rem">up {{.}}</div>{{end}}
+            </td>
+            <td>{{if .RouterName}}{{.RouterName}}{{else}}<span class="muted">router {{.RouterID}}</span>{{end}}</td>
+            <td>
+              {{if .Connected}}<span class="badge green">{{icon "check" "sm"}}connected</span>
+              {{else if .Online}}<span class="badge blue">{{icon "wifi" "sm"}}online</span>
+              {{else if .Leased}}<span class="badge slate">{{icon "link" "sm"}}leased</span>
+              {{else if .Saved}}<span class="badge slate">{{icon "save" "sm"}}saved</span>
+              {{else}}<span class="badge slate">{{icon "eye" "sm"}}seen</span>{{end}}
+            </td>
+            <td class="num nowrap">
+              {{if .Saved}}
+              <details style="display:inline-block">
+                <summary class="btn small">{{icon "pencil"}} Edit</summary>
+                <form method="post" action="{{$.AdminPath}}/devices/{{.ID}}" style="margin-top:8px; text-align:left">
+                  {{template "csrf" $}}
+                  <input type="hidden" name="router_id" value="{{.RouterID}}">
+                  <div class="field" style="margin-bottom:6px">
+                    <label for="edit-mac-{{.ID}}">MAC</label>
+                    <input id="edit-mac-{{.ID}}" name="mac" value="{{.MACAddress}}">
+                  </div>
+                  <div class="field" style="margin-bottom:6px">
+                    <label for="edit-name-{{.ID}}">Name</label>
+                    <input id="edit-name-{{.ID}}" name="name" value="{{.Name}}">
+                  </div>
+                  <div class="field" style="margin-bottom:6px">
+                    <label for="edit-notes-{{.ID}}">Notes</label>
+                    <input id="edit-notes-{{.ID}}" name="notes" value="{{.Notes}}">
+                  </div>
+                  <button class="btn small primary" type="submit">{{icon "save"}} Update</button>
+                </form>
+              </details>
+              <details style="display:inline-block">
+                <summary class="btn small danger">{{icon "trash"}} Delete</summary>
+                <form method="post" action="{{$.AdminPath}}/devices/{{.ID}}/delete" style="margin-top:8px; text-align:right">
+                  {{template "csrf" $}}
+                  <button class="btn small danger" type="submit">{{icon "trash"}} Confirm</button>
+                </form>
+              </details>
+              {{else if .MAC}}
+              <form method="post" action="{{$.AdminPath}}/devices" style="display:inline">
+                {{template "csrf" $}}
+                <input type="hidden" name="router_id" value="{{.RouterID}}">
+                <input type="hidden" name="mac" value="{{.MACAddress}}">
+                <input type="hidden" name="name" value="{{.Hostname}}">
+                <button class="btn small" type="submit" title="Save to the inventory">{{icon "save"}} Save</button>
+              </form>
+              {{else}}
+              <span class="muted" style="font-size:.78rem">no MAC</span>
+              {{end}}
+            </td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+      <div class="empty">{{icon "inbox"}} No devices discovered yet.{{if not .Routers}}
+        <a href="{{.AdminPath}}/routers">Register a router</a> to start collecting its clients.{{end}}</div>
+    {{end}}
+  </section>
+</main>
+{{template "footer" .}}
+</body>
+</html>

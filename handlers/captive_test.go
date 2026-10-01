@@ -209,7 +209,7 @@ func TestAdminMountServesTheWholePanel(t *testing.T) {
 	base, _ := newCaptiveE2E(t, Config{})
 	browser := signedInBrowser(t, base)
 
-	for _, path := range []string{"/admin/routers", "/admin/vouchers", "/admin/sessions", "/admin/tools"} {
+	for _, path := range []string{"/admin/routers", "/admin/vouchers", "/admin/devices", "/admin/tools"} {
 		page := getBody(t, browser, base+path)
 		if !strings.Contains(page, `class="topbar"`) {
 			t.Errorf("GET %s did not render a panel page", path)

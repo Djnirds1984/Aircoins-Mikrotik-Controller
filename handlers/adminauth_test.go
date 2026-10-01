@@ -21,7 +21,7 @@ func TestAdminPanelRequiresASession(t *testing.T) {
 	base, _ := newUnauthE2E(t, Config{})
 
 	guarded := []string{
-		"/admin/", "/admin/routers", "/admin/vouchers", "/admin/sessions",
+		"/admin/", "/admin/routers", "/admin/vouchers", "/admin/devices",
 		"/admin/settings", "/admin/portal-editor", "/routers", "/vouchers", "/api/v1/routers",
 	}
 	for _, path := range guarded {
@@ -395,7 +395,7 @@ func TestSignOutIsAvailableOnEveryPanelPage(t *testing.T) {
 
 	for _, path := range []string{
 		"/admin/", "/admin/routers", "/admin/vouchers",
-		"/admin/sessions", "/admin/portal-editor", "/admin/settings",
+		"/admin/devices", "/admin/portal-editor", "/admin/settings",
 	} {
 		t.Run(path, func(t *testing.T) {
 			body := getBody(t, client, base+path)

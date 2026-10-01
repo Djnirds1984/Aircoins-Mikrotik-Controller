@@ -882,11 +882,15 @@ type HotspotActive struct {
 	Address    string
 	MACAddress string
 	Uptime     string
-	LoginBy    string
-	Server     string
-	Comment    string
-	BytesIn    int64
-	BytesOut   int64
+	// SessionTimeLeft is the RouterOS "session-time-left" counter: how much
+	// paid time the client has before the hotspot logs it out. It is empty for
+	// an unlimited session or on builds that do not report it.
+	SessionTimeLeft string
+	LoginBy         string
+	Server          string
+	Comment         string
+	BytesIn         int64
+	BytesOut        int64
 }
 
 // TotalBytes is the traffic used by the client in both directions.
@@ -901,19 +905,81 @@ func (c *MikrotikClient) ActiveHotspotClients(ctx context.Context) ([]HotspotAct
 	clients := make([]HotspotActive, 0, len(reply.Re))
 	for _, row := range reply.Re {
 		clients = append(clients, HotspotActive{
-			ID:         row[".id"],
-			User:       row["user"],
-			Address:    row["address"],
-			MACAddress: database.FormatMAC(row["mac-address"]),
-			Uptime:     row["uptime"],
-			LoginBy:    row["login-by"],
-			Server:     row["server"],
-			Comment:    row["comment"],
-			BytesIn:    parseInt64(row["bytes-in"]),
-			BytesOut:   parseInt64(row["bytes-out"]),
+			ID:              row[".id"],
+			User:            row["user"],
+			Address:         row["address"],
+			MACAddress:      database.FormatMAC(row["mac-address"]),
+			Uptime:          row["uptime"],
+			SessionTimeLeft: row["session-time-left"],
+			LoginBy:         row["login-by"],
+			Server:          row["server"],
+			Comment:         row["comment"],
+			BytesIn:         parseInt64(row["bytes-in"]),
+			BytesOut:        parseInt64(row["bytes-out"]),
 		})
 	}
 	return clients, nil
+}
+
+// DHCPLease is one entry of /ip/dhcp-server/lease/print. The DEVICES page uses
+// it to resolve a client's hostname and last-known address by MAC address,
+// which the hotspot active list does not carry.
+type DHCPLease struct {
+	ID       string
+	HostName string
+	// MACAddress is the configured (static) MAC; ActiveMACAddress is the MAC the
+	// lease is currently bound to. A dynamic lease only has the latter.
+	MACAddress       string
+	ActiveMACAddress string
+	// Address is the configured/leased address; ActiveAddress is the one the
+	// client is using right now. Either may be empty.
+	Address       string
+	ActiveAddress string
+	Status        string
+	Bound         bool
+	Server        string
+	Comment       string
+}
+
+// EffectiveMAC returns the MAC to key a lease on, preferring the live binding.
+func (l DHCPLease) EffectiveMAC() string {
+	if mac := database.NormalizeMAC(l.ActiveMACAddress); mac != "" {
+		return mac
+	}
+	return database.NormalizeMAC(l.MACAddress)
+}
+
+// EffectiveAddress returns the address to show, preferring the live binding.
+func (l DHCPLease) EffectiveAddress() string {
+	if addr := strings.TrimSpace(l.ActiveAddress); addr != "" {
+		return addr
+	}
+	return strings.TrimSpace(l.Address)
+}
+
+// DHCPLeases lists the DHCP server leases of a device, used to attach a
+// hostname and address to a client the hotspot only reports by MAC.
+func (c *MikrotikClient) DHCPLeases(ctx context.Context) ([]DHCPLease, error) {
+	reply, err := c.Run(ctx, "/ip/dhcp-server/lease/print")
+	if err != nil {
+		return nil, err
+	}
+	leases := make([]DHCPLease, 0, len(reply.Re))
+	for _, row := range reply.Re {
+		leases = append(leases, DHCPLease{
+			ID:               row[".id"],
+			HostName:         row["host-name"],
+			MACAddress:       database.FormatMAC(row["mac-address"]),
+			ActiveMACAddress: database.FormatMAC(row["active-mac-address"]),
+			Address:          row["address"],
+			ActiveAddress:    row["active-address"],
+			Status:           row["status"],
+			Bound:            parseRouterOSBool(row["bound"]),
+			Server:           row["server"],
+			Comment:          row["comment"],
+		})
+	}
+	return leases, nil
 }
 
 // DisconnectClient ends a hotspot session. Newer RouterOS versions remove the

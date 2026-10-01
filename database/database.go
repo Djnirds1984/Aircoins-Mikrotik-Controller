@@ -162,3 +162,6 @@ func (db *DB) Coins() *CoinStore { return &CoinStore{db: db} }
 
 // Rates returns the coin-slot pricing store.
 func (db *DB) Rates() *RateStore { return &RateStore{db: db} }
+
+// Devices returns the operator-tracked device inventory store.
+func (db *DB) Devices() *DeviceStore { return &DeviceStore{db: db} }

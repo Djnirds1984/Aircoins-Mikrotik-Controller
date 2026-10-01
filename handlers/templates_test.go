@@ -14,7 +14,7 @@ var templateNames = []string{
 	"router.html",
 	"network.html",
 	"tools.html",
-	"sessions.html",
+	"devices.html",
 	"vouchers.html",
 	"rates.html",
 	"captive.html",

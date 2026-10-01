@@ -206,6 +206,35 @@ const coinCreditsIndexesDDL = `
     CREATE INDEX IF NOT EXISTS coin_credits_status_idx ON coin_credits(status, updated_at DESC);
     CREATE INDEX IF NOT EXISTS coin_credits_node_idx ON coin_credits(node_id)`
 
+// devicesDDL backs the admin DEVICES page: the operator's own inventory of
+// client devices.
+//
+// Only the durable identity of a device is stored here - which router it
+// belongs to, its MAC address, a friendly name and free-form notes. The
+// volatile facts (its current IP address, DHCP hostname and how much paid
+// session time is left) are read live from the router on every page load and
+// are deliberately NOT persisted, so the table can never show a stale address
+// for a device that has since moved.
+//
+// MAC is stored normalised (see NormalizeMAC) and is unique per router, so the
+// same physical device cannot be saved twice on one hotspot while still being
+// trackable on two different routers.
+const devicesDDL = `
+CREATE TABLE IF NOT EXISTS devices (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    router_id  INTEGER NOT NULL REFERENCES routers(id) ON DELETE CASCADE,
+    mac        TEXT NOT NULL,
+    name       TEXT NOT NULL DEFAULT '',
+    notes      TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (router_id, mac)
+)`
+
+const devicesIndexesDDL = `
+CREATE INDEX IF NOT EXISTS devices_router_idx ON devices(router_id);
+CREATE INDEX IF NOT EXISTS devices_mac_idx ON devices(mac)`
+
 const (
 	routersTransportDDL = `ALTER TABLE routers ADD COLUMN transport TEXT NOT NULL DEFAULT 'auto'`
 	routersRestPortDDL  = `ALTER TABLE routers ADD COLUMN rest_port INTEGER NOT NULL DEFAULT 0`
@@ -282,6 +311,17 @@ var migrations = []migration{
 			// COIN_SECONDS_PER_PULSE exactly as before.
 			ratesDDL,
 			ratesIndexesDDL,
+		},
+	},
+	{
+		version: 8,
+		name:    "devices",
+		statements: []string{
+			// The operator-tracked device inventory behind the admin DEVICES
+			// page, which replaces the retired session-history view. Additive:
+			// an install that never saves a device is unaffected.
+			devicesDDL,
+			devicesIndexesDDL,
 		},
 	},
 }

@@ -4,125 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/djnirds1984/aircoins-mikrotik-controller/database"
 )
-
-// sessionPageSize is how many rows the history page shows per page.
-const sessionPageSize = 50
-
-// sessionsPage backs the session history view.
-type sessionsPage struct {
-	page
-	Sessions []database.Session
-	Routers  []database.Router
-	Filter   sessionFilter
-	Total    int64
-	PageNo   int
-	Pages    int
-	PrevURL  string
-	NextURL  string
-}
-
-// sessionFilter mirrors the query string of the history page.
-type sessionFilter struct {
-	RouterID int64
-	Status   string
-	Query    string
-	MAC      string
-}
-
-// SessionsList renders the session history with filters and paging.
-func (h *Handler) SessionsList(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	query := r.URL.Query()
-
-	filter := sessionFilter{
-		Status: strings.TrimSpace(query.Get("status")),
-		Query:  strings.TrimSpace(query.Get("q")),
-		MAC:    strings.TrimSpace(query.Get("mac")),
-	}
-	if raw := query.Get("router"); raw != "" {
-		if id, err := strconv.ParseInt(raw, 10, 64); err == nil {
-			filter.RouterID = id
-		}
-	}
-	pageNo := 1
-	if raw := query.Get("page"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-			pageNo = n
-		}
-	}
-
-	dbFilter := database.SessionFilter{
-		RouterID: filter.RouterID,
-		Status:   filter.Status,
-		Query:    filter.Query,
-		MAC:      filter.MAC,
-		Limit:    sessionPageSize,
-		Offset:   (pageNo - 1) * sessionPageSize,
-	}
-
-	total, err := h.db.Sessions().Count(ctx, database.SessionFilter{
-		RouterID: filter.RouterID, Status: filter.Status, Query: filter.Query, MAC: filter.MAC,
-	})
-	if err != nil {
-		h.fail(w, r, "count sessions", err)
-		return
-	}
-	sessions, err := h.db.Sessions().List(ctx, dbFilter)
-	if err != nil {
-		h.fail(w, r, "load sessions", err)
-		return
-	}
-	routers, err := h.db.Routers().List(ctx)
-	if err != nil {
-		h.fail(w, r, "load router inventory", err)
-		return
-	}
-
-	pages := int((total + sessionPageSize - 1) / sessionPageSize)
-	if pages == 0 {
-		pages = 1
-	}
-	h.render(w, r, http.StatusOK, "sessions.html", &sessionsPage{
-		page:     page{Title: "Sessions", Nav: "sessions"},
-		Sessions: sessions,
-		Routers:  routers,
-		Filter:   filter,
-		Total:    total,
-		PageNo:   pageNo,
-		Pages:    pages,
-		PrevURL:  sessionPageURL(filter, pageNo-1),
-		NextURL:  sessionPageURL(filter, pageNo+1),
-	})
-}
-
-// sessionPageURL builds a history link preserving the current filters.
-func sessionPageURL(filter sessionFilter, page int) string {
-	if page < 1 {
-		page = 1
-	}
-	values := url.Values{}
-	if filter.RouterID > 0 {
-		values.Set("router", strconv.FormatInt(filter.RouterID, 10))
-	}
-	if filter.Status != "" {
-		values.Set("status", filter.Status)
-	}
-	if filter.Query != "" {
-		values.Set("q", filter.Query)
-	}
-	if filter.MAC != "" {
-		values.Set("mac", filter.MAC)
-	}
-	values.Set("page", strconv.Itoa(page))
-	return "/sessions?" + values.Encode()
-}
 
 // SessionDisconnect ends a live hotspot session on the device and marks it
 // closed locally. The optional "block" checkbox also creates a blocked IP

@@ -18,6 +18,9 @@ import (
 // rows.
 const maxVoucherBatch = 500
 
+// voucherPageSize is how many rows the voucher ledger shows per page.
+const voucherPageSize = 50
+
 // vouchersPage backs the voucher engine view.
 type vouchersPage struct {
 	page
@@ -213,8 +216,8 @@ func (h *Handler) renderVouchers(w http.ResponseWriter, r *http.Request, filter 
 		RouterID: filter.RouterID,
 		Batch:    filter.Batch,
 		Query:    filter.Query,
-		Limit:    sessionPageSize,
-		Offset:   (pageNo - 1) * sessionPageSize,
+		Limit:    voucherPageSize,
+		Offset:   (pageNo - 1) * voucherPageSize,
 	}
 
 	total, err := h.db.Vouchers().Count(ctx, database.VoucherFilter{
@@ -248,7 +251,7 @@ func (h *Handler) renderVouchers(w http.ResponseWriter, r *http.Request, filter 
 		form = newVoucherForm(0)
 	}
 
-	pages := int((total + sessionPageSize - 1) / sessionPageSize)
+	pages := int((total + voucherPageSize - 1) / voucherPageSize)
 	if pages == 0 {
 		pages = 1
 	}

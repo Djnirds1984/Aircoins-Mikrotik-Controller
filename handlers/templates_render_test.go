@@ -298,14 +298,28 @@ func TestPageTemplatesRender(t *testing.T) {
 		{"router inventory errors", "routers.html", &routersPage{
 			page: samplePage("Routers", "routers"), Form: invalidForm,
 		}},
-		{"session history", "sessions.html", &sessionsPage{
-			page: samplePage("Sessions", "sessions"), Sessions: sessions, Routers: routers,
-			Filter:  sessionFilter{RouterID: 1, Status: "open", Query: "guest", MAC: "AA:BB"},
-			Total:   42,
-			PageNo:  2,
-			Pages:   5,
-			PrevURL: "/sessions?page=1",
-			NextURL: "/sessions?page=3",
+		{"devices", "devices.html", &devicesPage{
+			page:    samplePage("Devices", "devices"),
+			Routers: routers,
+			Devices: []deviceRow{
+				{
+					RouterID: 1, RouterName: "Ground floor", Hostname: "cafe-pc",
+					Address: "192.168.88.10", MAC: "AA:BB:CC:DD:EE:FF", User: "guest",
+					SessionTimeLeft: "00:42:11", Uptime: "00:17:53",
+					Connected: true, Leased: true, Online: true,
+					ID: 7, Name: "Front desk", Notes: "Installed 2026-10-01",
+				},
+				{
+					RouterID: 1, RouterName: "Ground floor", Address: "192.168.88.11",
+					MAC: "11:22:33:44:55:66", Leased: true, Online: false,
+				},
+			},
+			Filter:    deviceFilter{RouterID: 1, Query: "cafe"},
+			Form:      newDeviceForm(1),
+			Warnings:  []string{"Ground floor: DHCP leases unavailable (timeout)"},
+			Total:     2,
+			Connected: 1,
+			Saved:     1,
 		}},
 		{"vouchers", "vouchers.html", &vouchersPage{
 			page: samplePage("Vouchers", "vouchers"), Vouchers: vouchers, Routers: routers,
