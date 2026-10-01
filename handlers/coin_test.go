@@ -569,7 +569,7 @@ func TestSketchContract(t *testing.T) {
 //
 // It is requested with no query string on purpose: a hotspot that redirects a
 // client to "/" with its parameters appended is forwarded to the sign-in form
-// (portal.html), and the kiosk skin is the landing a guest sees when they open
+// (captive.html in login mode), and the kiosk skin is the landing a guest sees when they open
 // the controller's address directly.
 func TestKioskLayoutRendersThePisoSkin(t *testing.T) {
 	base, _ := newCaptiveE2E(t, coinTestConfig())

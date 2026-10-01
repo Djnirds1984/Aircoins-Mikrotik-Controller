@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{{default .Branding.HeaderName .PortalName}}</title>
 <meta name="robots" content="noindex, nofollow">
+{{if .RedirectTo}}<meta http-equiv="refresh" content="3;url={{.RedirectTo}}">{{end}}
 {{template "styles" .}}
 <style>{{.Branding.ThemeCSS}}</style>
 <style>
@@ -273,6 +274,63 @@ body.kiosk{
 }
 .kiosk-foot a{color:var(--k-muted)}
 
+/* ---- alerts ------------------------------------------------------------ */
+.kiosk-alert{
+  display:flex; align-items:flex-start; gap:10px;
+  padding:12px 14px; border-radius:12px;
+  font-size:.86rem; line-height:1.45;
+}
+.kiosk-alert .icon{width:18px; height:18px; flex-shrink:0; margin-top:1px}
+.kiosk-alert.err{
+  background:rgba(229,72,77,.14); border:1px solid rgba(229,72,77,.35);
+  color:#f5a0a3;
+}
+.kiosk-alert.err .icon{stroke:var(--k-red)}
+.kiosk-alert.ok{
+  background:rgba(34,224,214,.12); border:1px solid rgba(34,224,214,.32);
+  color:#a1f0ec;
+}
+.kiosk-alert.ok .icon{stroke:var(--k-teal)}
+.kiosk-alert.info{
+  background:rgba(142,163,191,.1); border:1px solid rgba(142,163,191,.25);
+  color:var(--k-muted);
+}
+.kiosk-alert.info .icon{stroke:var(--k-muted)}
+
+/* ---- success voucher details ------------------------------------------- */
+.kiosk-success-meta{
+  display:grid; grid-template-columns:auto 1fr; gap:4px 12px;
+  padding:12px 14px; border-radius:12px;
+  background:var(--k-panel); border:1px solid var(--k-line);
+  font-size:.82rem; color:var(--k-muted);
+}
+.kiosk-success-meta dt{font-weight:700; text-transform:uppercase; letter-spacing:.08em; font-size:.72rem}
+.kiosk-success-meta dd{margin:0; color:var(--k-text); font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+/* ---- staff login disclosure -------------------------------------------- */
+.kiosk-details{
+  background:var(--k-panel); border:1px solid var(--k-line); border-radius:14px;
+  overflow:hidden;
+}
+.kiosk-details summary{
+  display:flex; align-items:center; gap:8px;
+  padding:13px 16px; cursor:pointer;
+  font-size:.84rem; font-weight:700; color:var(--k-muted);
+  letter-spacing:.04em;
+}
+.kiosk-details summary:hover{color:var(--k-text)}
+.kiosk-details summary .icon{width:16px; height:16px; stroke:var(--k-muted)}
+.kiosk-details[open] summary{border-bottom:1px solid var(--k-line)}
+.kiosk-details form{padding:14px 16px; display:flex; flex-direction:column; gap:10px}
+.kiosk-details input{
+  width:100%; padding:12px 14px;
+  background:#0a1017; color:var(--k-text);
+  border:1px solid var(--k-line); border-radius:10px;
+  font:inherit; font-size:.92rem;
+}
+.kiosk-details input::placeholder{color:#5c708c}
+.kiosk-details input:focus{outline:none; border-color:var(--k-teal); box-shadow:0 0 0 3px rgba(34,224,214,.15)}
+
 /* ---- phones ------------------------------------------------------------ */
 @media (max-width:420px){
   .kiosk-banner{min-height:108px}
@@ -351,7 +409,27 @@ body.kiosk{
          already holds a session is none of those things, and offering a
          connected customer an "Insert coin" button is how a kiosk convinces
          someone to pay twice for time they already have. */}}
-    {{if .Online}}
+    {{if .FormError}}<div class="kiosk-alert err">{{icon "x-circle"}} {{.FormError}}</div>{{end}}
+    {{if .Notice}}<div class="kiosk-alert info">{{icon "info"}} {{.Notice}}</div>{{end}}
+
+    {{if .Success}}
+      <div class="kiosk-alert ok">{{icon "check-circle"}} <strong>Welcome online.</strong> Your session is active.</div>
+      {{if .Voucher}}
+      <dl class="kiosk-success-meta">
+        <dt>Voucher</dt><dd>{{.Voucher.Code}}</dd>
+        <dt>Allowance</dt><dd>{{.Voucher.LimitSummary}}</dd>
+        {{if .Voucher.ExpiresAt}}<dt>Valid until</dt><dd>{{timeLabel .Voucher.ExpiresAt}}</dd>{{end}}
+      </dl>
+      {{end}}
+      <div class="kiosk-actions">
+        {{if .RedirectTo}}
+          <a class="kiosk-btn coin" href="{{.RedirectTo}}">{{icon "external-link"}} Continue browsing</a>
+        {{else if .FallbackLink}}
+          <a class="kiosk-btn coin" href="{{.FallbackLink}}">{{icon "external-link"}} Continue browsing</a>
+        {{end}}
+        <a class="kiosk-btn grey" href="/portal/session">{{icon "clock"}} View session timer</a>
+      </div>
+    {{else if .Online}}
       <p class="hint">You are online. You can close this page and open any website.</p>
       <div class="kiosk-actions">
         <a class="kiosk-btn coin" href="/portal/session">View session timer</a>
@@ -407,6 +485,17 @@ body.kiosk{
              spellcheck="false" placeholder="Voucher Here.." aria-label="Voucher code">
       <button type="submit">{{icon "check"}} Submit</button>
     </form>
+
+    {{if eq .ViewMode "login"}}
+    <details class="kiosk-details"{{if .ShowPassword}} open{{end}}>
+      <summary>{{icon "chevron-down"}} Staff or username login</summary>
+      <form method="post" action="{{portalAction .Portal}}">
+        <input name="username" placeholder="Username" autocomplete="username">
+        <input name="password" type="password" placeholder="Password" autocomplete="current-password">
+        <button class="kiosk-btn grey" type="submit">{{icon "log-out"}} Sign in</button>
+      </form>
+    </details>
+    {{end}}
 
 
 

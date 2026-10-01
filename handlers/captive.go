@@ -46,6 +46,26 @@ type captivePage struct {
 	Clock        countdownParts
 	ClockSeconds int
 	ClockMode    string
+
+	// ViewMode discriminates the state the template renders: "kiosk" (or empty)
+	// for the landing page, "login" for the sign-in form after a hotspot
+	// redirect, and "success" after a completed authentication.
+	ViewMode string
+
+	// FormError is a validation or redemption failure message shown as an alert.
+	FormError string
+	// Notice is an informational message (e.g. a redemption note).
+	Notice string
+	// Success reports that the guest authenticated successfully.
+	Success bool
+	// Voucher carries the redeemed voucher details for the success panel.
+	Voucher *database.Voucher
+	// RedirectTo is the original destination after a successful login.
+	RedirectTo string
+	// ShowPassword reports that the username field was filled (password login).
+	ShowPassword bool
+	// FallbackLink is the hotspot's own login URL when RedirectTo is empty.
+	FallbackLink string
 }
 
 // coinPortal is everything the guest's coin tab needs.
@@ -182,6 +202,33 @@ func (h *Handler) PortalProbe(w http.ResponseWriter, r *http.Request) {
 		view.RouterKnown = true
 	}
 	h.render(w, r, http.StatusOK, "captive.html", view)
+}
+
+// captivePageFromPortal converts a portalPage (used by the full-page renderer
+// and the POST handlers) into the unified captivePage that captive.html renders.
+func captivePageFromPortal(p *portalPage) *captivePage {
+	cp := &captivePage{
+		page:         p.page,
+		Portal:       p.Portal,
+		RouterName:   p.RouterName,
+		RouterKnown:  p.RouterKnown,
+		Branding:     p.Branding,
+		Coin:         p.Coin,
+		FormError:    p.FormError,
+		Notice:       p.Notice,
+		Success:      p.Success,
+		Voucher:      p.Voucher,
+		RedirectTo:   p.RedirectTo,
+		ShowPassword: p.ShowPassword,
+		FallbackLink: p.FallbackLink,
+		LoginURL:     portalLoginPath,
+	}
+	if p.Success {
+		cp.ViewMode = "success"
+	} else {
+		cp.ViewMode = "login"
+	}
+	return cp
 }
 
 // portalClientSession looks for a live session owned by the address of the

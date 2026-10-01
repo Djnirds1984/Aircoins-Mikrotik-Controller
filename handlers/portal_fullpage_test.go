@@ -64,7 +64,7 @@ func TestPortalFullPageReplacesStandardPage(t *testing.T) {
 	if !strings.Contains(body, "id=\"timer\"") {
 		t.Error("the operator page was not served on the sign-in path")
 	}
-	if strings.Contains(body, "portal-card") {
+	if strings.Contains(body, captivePortalMarker) {
 		t.Error("the built-in captive layout is still being served")
 	}
 	// The script is the whole point of full-page mode: the countdown in the
@@ -146,7 +146,7 @@ func TestPortalFullPageFallsBackOnBrokenTemplate(t *testing.T) {
 	}
 
 	body := getBody(t, &http.Client{}, base+"/portal/login")
-	if !strings.Contains(body, "portal-card") {
+	if !strings.Contains(body, captivePortalMarker) {
 		t.Error("a broken operator page did not fall back to the built-in layout")
 	}
 	if !strings.Contains(body, "voucher") {
@@ -170,7 +170,7 @@ func TestPortalFullPageEmptyHTMLFallsBack(t *testing.T) {
 	}
 
 	body := getBody(t, client, base+"/portal/login")
-	if !strings.Contains(body, "portal-card") {
+	if !strings.Contains(body, captivePortalMarker) {
 		t.Error("an empty full page blanked the portal instead of falling back")
 	}
 }
@@ -190,7 +190,7 @@ func TestPortalFullPageStaysOffInStandardMode(t *testing.T) {
 	if strings.Contains(body, "id=\"timer\"") {
 		t.Error("the operator page is still served in standard mode")
 	}
-	if !strings.Contains(body, "portal-card") {
+	if !strings.Contains(body, captivePortalMarker) {
 		t.Error("the built-in layout is missing in standard mode")
 	}
 

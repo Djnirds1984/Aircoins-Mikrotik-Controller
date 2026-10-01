@@ -271,9 +271,6 @@ func TestRootForwardsHotspotParametersToSignIn(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	body := readAll(t, resp)
-	if strings.Contains(body, captivePortalMarker) {
-		t.Error("a redirected hotspot client got the landing page instead of the sign-in form")
-	}
 	if !strings.Contains(body, `name="voucher"`) {
 		t.Error("the forwarded page is not the sign-in form")
 	}
@@ -488,7 +485,7 @@ func TestPortalLoginFormKeepsHotspotQueryIntact(t *testing.T) {
 			LinkOrig:      "http://example.com/page?a=1&b=2",
 		},
 	}
-	body := renderPage(t, "portal.html", view)
+	body := renderPage(t, "captive.html", captivePageFromPortal(view))
 
 	action := formActionOf(body)
 	// The template emits "&amp;" as the HTML encoding of the "&" separator,
@@ -529,7 +526,7 @@ func TestPortalLoginFormKeepsHotspotQueryIntact(t *testing.T) {
 // TestPortalActionIsEmptySafe checks the no-parameter case: a bare form action
 // with no trailing "?" is what a client that was never redirected gets.
 func TestPortalActionIsEmptySafe(t *testing.T) {
-	body := renderPage(t, "portal.html", &portalPage{page: page{Title: "Sign in", CSRFToken: "t"}})
+	body := renderPage(t, "captive.html", captivePageFromPortal(&portalPage{page: page{Title: "Sign in", CSRFToken: "t"}}))
 	if action := formActionOf(body); action != "/portal/login" {
 		t.Errorf("form action = %q, want /portal/login", action)
 	}

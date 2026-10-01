@@ -274,7 +274,7 @@ func (h *Handler) portalPasswordLogin(w http.ResponseWriter, r *http.Request, vi
 //
 // When the operator has switched the PORTAL editor to full-page mode their own
 // document is served instead. It is rendered through this one helper on every
-// path that would otherwise render portal.html, so a guest sees the same page
+// path that would otherwise render captive.html, so a guest sees the same page
 // whether they arrived at the welcome screen, the sign-in form or the result of
 // a login attempt. A page that fails to compile falls back to the built-in
 // layout rather than showing the guest an error.
@@ -284,7 +284,7 @@ func (h *Handler) renderPortal(w http.ResponseWriter, r *http.Request, status in
 		// Degrade to the built-in page: a guest cannot fix a database read
 		// error, and a working sign-in form beats a 500.
 		h.log.Warn("portal settings unavailable, serving the built-in page", "error", err)
-		h.render(w, r, status, "portal.html", view)
+		h.render(w, r, status, "captive.html", captivePageFromPortal(view))
 		return
 	}
 
@@ -300,7 +300,7 @@ func (h *Handler) renderPortal(w http.ResponseWriter, r *http.Request, status in
 	if h.portalFull.render(w, r, view, settings, env) {
 		return
 	}
-	h.render(w, r, status, "portal.html", view)
+	h.render(w, r, status, "captive.html", captivePageFromPortal(view))
 }
 
 // finishPortalLogin sends the client on to its original destination, or renders
